@@ -5,6 +5,7 @@
 
 import { LOADING, SIGNED_IN, SIGNED_OUT, signOut, watchAuth } from './auth.js'
 import { button, clearBanner, clear, el, mount, showNotice } from './ui.js'
+import { gameView } from './views/game.js'
 import { historyView } from './views/history.js'
 import { homeView } from './views/home.js'
 import { peopleView } from './views/people.js'
@@ -22,6 +23,9 @@ const TABS = [
 
 const routeFor = (hash) => TABS.find((t) => t.hash === hash) ?? TABS[0]
 
+// The only parameterised route. Anything else falls through to the tabs.
+const GAME_ROUTE = /^#\/game\/([\w-]+)$/
+
 function render() {
   clear(app)
 
@@ -35,6 +39,13 @@ function render() {
 
   if (state === SIGNED_OUT) {
     app.appendChild(signinView())
+    return
+  }
+
+  const game = GAME_ROUTE.exec(location.hash)
+  if (game) {
+    app.appendChild(gameView(game[1]))
+    app.appendChild(tabBar(null))
     return
   }
 

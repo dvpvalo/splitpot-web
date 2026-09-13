@@ -344,3 +344,42 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   #app { padding-bottom: 24px; display: flex; flex-direction: column; }
   .tabs { order: -1; }
 }
+
+/* ---------- live table ---------- */
+
+.stack-tight { display: flex; flex-direction: column; gap: 8px; }
+
+.meter {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 150ms ease-out;
+}
+
+/* Squared up: the bar turns the win colour rather than staying the control colour. */
+.meter-done { background: var(--up); }
+
+.pills { display: flex; gap: 8px; }
+.pills .chip { flex: 1; }
+
+.monogram {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.tag-settled { color: var(--muted); }

@@ -631,3 +631,31 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
 @media (min-width: 900px) {
   .theme-cycle { position: absolute; top: 16px; right: 16px; }
 }
+
+/* A phone held sideways. There is barely 375px of height, and stacked the way it is in
+   portrait the keypad pushes "Add buy-in" below the fold - so the one control the whole
+   sheet exists for needs a scroll to reach. Keypad to one side, everything else to the
+   other, and it fits.
+
+   Keyed on height rather than a device: a short window on a laptop has the same problem. */
+@media (max-height: 520px) and (min-width: 600px) {
+  .sheet { width: min(760px, 100%); }
+
+  .sheet-body {
+    display: grid;
+    grid-template-columns: 1fr minmax(220px, 40%);
+    column-gap: 20px;
+    align-items: start;
+  }
+
+  .sheet-body > * { grid-column: 1; }
+
+  .sheet-body > .keypad {
+    grid-column: 2;
+    grid-row: 1 / span 8;
+    margin: 0;
+    align-self: start;
+  }
+
+  .key { min-height: 44px; }
+}

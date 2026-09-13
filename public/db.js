@@ -221,7 +221,12 @@ export function gameChanges(gameId, onChange) {
   sessionReady.then(({ data }) => {
     const token = data.session?.access_token
     if (token) client.realtime.setAuth(token)
-    channel.subscribe()
+    // Realtime does not replay what happened while the socket was down. A buy-in logged on
+    // the phone during a wifi drop would otherwise stay missing from this page until some
+    // LATER change happened to trigger a fetch. The callback fires SUBSCRIBED on every
+    // successful join, rejoins after a reconnect included, so refetch each time. The first
+    // one also covers a change landing between the initial load and the join.
+    channel.subscribe((status) => { if (status === 'SUBSCRIBED') onChange() })
   })
 
   return () => client.removeChannel(channel)

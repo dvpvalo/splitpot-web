@@ -665,10 +665,13 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   /* Two columns alone was not enough - the submit button still sat a few pixels below the
      fold. Everything above it gives up its portrait breathing room, because on 375px of
      height being reachable beats being roomy. */
+  /* Measured on the phone rather than guessed: the header was 65px and the amount block 54,
+     which is a third of everything there is. Both give it back. */
   .sheet-body { padding-top: 8px; }
-  .sheet-head { padding-top: 10px; padding-bottom: 10px; }
+  .sheet-head { padding-top: 6px; padding-bottom: 6px; }
+  .sheet-title { font-size: 1rem; }
   .sheet-sub { margin-bottom: 6px; }
-  .amount-display { margin: 6px 0; font-size: 1.75rem; }
+  .amount-display { margin: 2px 0; font-size: 1.375rem; }
 
   /* And then the real phone gave 283px, not the 375 an emulator suggested - Chrome's own
      toolbar takes the rest - so trimming was never going to be enough.
@@ -685,5 +688,5 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   .sheet-body > .pills { order: -4; }
   .sheet-body > .amount-display { order: -3; }
   .sheet-body > .chips { order: -2; }
-  .sheet-body > .btn-primary { order: -1; margin: 0 0 10px; }
+  .sheet-body > .btn-primary { order: -1; margin: 0 0 6px; }
 }

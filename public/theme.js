@@ -21,17 +21,20 @@ const CYCLE = ['midnight', 'daylight', 'felt', 'paper']
 
 const valid = (key) => THEMES.some((t) => t.key === key)
 
+/** What a first visit gets: the card room, same as the phone's default. */
+const DEFAULT = 'felt'
+
 export function current() {
   try {
     const stored = localStorage.getItem(KEY)
-    return valid(stored) ? stored : 'system'
+    return valid(stored) ? stored : DEFAULT
   } catch {
-    return 'system'
+    return DEFAULT
   }
 }
 
 export function apply(key) {
-  const theme = valid(key) ? key : 'system'
+  const theme = valid(key) ? key : DEFAULT
   document.documentElement.dataset.theme = theme
   // Keeps the phone's own browser chrome in step with the page it is framing.
   const meta = document.querySelector('meta[name="theme-color"]')

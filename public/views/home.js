@@ -27,6 +27,11 @@ export function homeView() {
 
       clear(body)
       body.appendChild(live ? liveCard(live) : noGameCard())
+      if (!live) {
+        const start = el('a', 'btn btn-primary btn-link-solid', 'New game')
+        start.href = '#/new'
+        body.appendChild(start)
+      }
       if (lastNight) mount(body, sectionLabel('Last night'), lastNightCard(lastNight))
       if (pending !== null) mount(body, sectionLabel('Who owes what'), owedCard(pending))
     } catch (e) {

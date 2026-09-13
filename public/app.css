@@ -428,3 +428,26 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   color: var(--text);
   touch-action: manipulation;
 }
+
+/* ---------- forms ---------- */
+
+.field-wrap { display: block; }
+.field-label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 0.875rem; }
+
+.two-up { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+
+.checkline { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-bottom: 8px; }
+.checkline input { width: 20px; height: 20px; }
+
+/* A link styled as the primary button. Anchors ignore .btn's button-only rules. */
+.btn-link-solid { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* ---------- destructive and toggled ---------- */
+
+/* Stamp red is reserved for money lost and for errors - never for ordinary controls, or a
+   loss looks like a button. Destructive actions earn it; that IS the warning. */
+.btn-danger { color: var(--danger); border-color: var(--danger); }
+.btn-on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+
+.actions { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); gap: 4px; }
+.actions .btn-link { align-self: flex-start; }

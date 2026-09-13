@@ -3,7 +3,7 @@
 // Quick chips first, keypad second. The chips are the whole point - a host at a real table
 // taps "Again" rather than typing 200 for the ninth time.
 
-import { addEntry } from '../db.js'
+import { addEntry, deleteEntry, unseatPlayer } from '../db.js'
 import { formatAmount, formatMoney, minorUnitDigits, parseMoney } from '../lib/money.js'
 import { parseInstant, relativeLabel } from '../lib/time.js'
 import { button, clear, clearBanner, el, money, mount, sheet, showError } from '../ui.js'
@@ -114,7 +114,8 @@ export function playerSheet(seat, detail, onSaved) {
     el('p', 'sheet-sub', `Buy-in ${formatMoney(seat.buyInCents, currency)}`
       + (seat.hasCashedOut ? ` · Cash-out ${formatMoney(seat.cashOutCents, currency)}` : '')),
     modes, amountLine, chips, pad, submit, note,
-    history(seat, detail),
+    history(seat, detail, onSaved, () => dlg.close()),
+    removeSeat(seat, detail, onSaved, () => dlg.close()),
   )
 
   draw()
@@ -132,12 +133,13 @@ function buildKeypad(pad, allowDecimal, onKey) {
   }
 }
 
-function history(seat, detail) {
+function history(seat, detail, onSaved, close) {
   const mine = detail.entries.filter((e) => e.game_player_id === seat.gamePlayerId)
   const wrap = el('div', 'stack-tight')
   if (mine.length === 0) return wrap
   wrap.appendChild(el('h3', 'section-label', 'This game'))
   const now = new Date()
+  const live = detail.game.status === 'live'
   const list = el('div', 'list')
   for (const e of [...mine].reverse()) {
     const row = el('div', 'row')
@@ -146,11 +148,101 @@ function history(seat, detail) {
       el('h4', 'row-title', e.kind === 'buyin' ? 'Buy-in' : 'Cash-out'),
       el('p', 'row-sub', relativeLabel(parseInstant(e.created_at), now)),
     )
-    mount(row, main, money(
+    const right = el('div', 'row-right')
+    right.appendChild(money(
       e.kind === 'buyin' ? -e.amount_cents : e.amount_cents, detail.game.currency, true,
     ))
+    if (live) right.appendChild(removeEntry(e, seat, detail, onSaved, close))
+    mount(row, main, right)
     list.appendChild(row)
   }
   wrap.appendChild(list)
+  return wrap
+}
+
+/**
+ * Deleting a mis-tap, with an undo rather than a confirm.
+ *
+ * A confirm on every correction would be a second tap 70 times a night. Undo is the right
+ * shape here because the entry can be recreated exactly - it is an amount and a kind, and
+ * nothing else about it is unique. The only thing that changes is created_at, which moves the
+ * row to the end of the timeline; that is worth saying rather than hiding.
+ */
+function removeEntry(entry, seat, detail, onSaved, close) {
+  const btn = button('Delete', async () => {
+    btn.disabled = true
+    clearBanner()
+    try {
+      await deleteEntry(entry.id)
+      close()
+      await onSaved()
+      const label = formatMoney(entry.amount_cents, detail.game.currency)
+      const kind = entry.kind === 'buyin' ? 'Buy-in' : 'Cash-out'
+      showUndo(`${kind} of ${label} for ${seat.player.name} deleted.`, async () => {
+        await addEntry({
+          gameId: detail.game.id,
+          gamePlayerId: seat.gamePlayerId,
+          kind: entry.kind,
+          amountCents: entry.amount_cents,
+        })
+        await onSaved()
+      })
+    } catch (e) {
+      btn.disabled = false
+      showError(`That entry was NOT deleted: ${e.message ?? e}`)
+    }
+  }, 'btn-rebuy btn-danger')
+  btn.setAttribute('aria-label', 'Delete this entry')
+  return btn
+}
+
+function showUndo(message, undo) {
+  const bar = document.getElementById('banner')
+  clear(bar)
+  bar.className = 'banner banner-notice'
+  bar.appendChild(el('span', null, message))
+  const btn = button('Undo', async () => {
+    btn.disabled = true
+    try {
+      await undo()
+      clearBanner()
+    } catch (e) {
+      showError(`Could not undo that: ${e.message ?? e}`)
+    }
+  }, 'btn-inline')
+  bar.appendChild(btn)
+  bar.hidden = false
+}
+
+/**
+ * Taking a seat back off the table. Blocked once they have money on it, because unseating
+ * would orphan their entries: the seat row goes, the entries stay, and the game's totals
+ * stop matching the sum of its players.
+ */
+function removeSeat(seat, detail, onSaved, close) {
+  const wrap = el('div', 'stack-tight')
+  if (detail.game.status !== 'live') return wrap
+  const hasMoney = seat.buyInCents > 0 || seat.cashOutCents > 0
+
+  const btn = button('Remove from game', async () => {
+    if (!confirm(`Take ${seat.player.name} off this table?`)) return
+    btn.disabled = true
+    clearBanner()
+    try {
+      await unseatPlayer(seat.gamePlayerId)
+      close()
+      await onSaved()
+    } catch (e) {
+      btn.disabled = false
+      showError(`${seat.player.name} was NOT removed: ${e.message ?? e}`)
+    }
+  }, 'btn-link btn-danger')
+
+  if (hasMoney) {
+    btn.disabled = true
+    wrap.appendChild(el('p', 'muted small',
+      'Delete their buy-ins and cash-outs above before taking them off the table.'))
+  }
+  wrap.appendChild(btn)
   return wrap
 }

@@ -4,10 +4,14 @@
 // Every write here is awaited against the server before anything redraws. A failure raises a
 // banner naming the player and the amount, with Retry; it never fails quietly.
 
-import { addEntry, gameChanges, gameDetail, standingsOf } from '../db.js'
+import {
+  addEntry, deleteGame, finishGame, gameChanges, gameDetail, players,
+  reopenGame, seatPlayer, setSettlementPaid, standingsOf,
+} from '../db.js'
 import { formatMoney, settle } from '../lib/money.js'
 import { durationLabel, longDate, parseInstant, relativeLabel } from '../lib/time.js'
-import { button, clear, clearBanner, el, money, mount, showError } from '../ui.js'
+import { button, clear, clearBanner, el, money, mount, sheet, showError, showNotice } from '../ui.js'
+import { ledgerMessage, ledgerUrl } from '../lib/share.js'
 import { playerSheet } from './playersheet.js'
 
 export function gameView(gameId) {
@@ -31,7 +35,8 @@ export function gameView(gameId) {
         header(detail),
         meter(detail),
         seatSection(detail, () => load(true), ui),
-        settlementSection(detail),
+        settlementSection(detail, () => load(true)),
+        actionsSection(detail, () => load(true)),
       )
     } catch (e) {
       // A failed background refresh must never blank a table that is already on screen and
@@ -212,7 +217,7 @@ function timeline(detail) {
  * them on every render would let them drift the moment anyone reopens the game and corrects
  * an entry — and it would silently lose the paid ticks, which live only on the stored rows.
  */
-function settlementSection(detail) {
+function settlementSection(detail, reload) {
   const wrap = el('div', 'stack-tight')
   const live = detail.game.status === 'live'
   wrap.appendChild(el('h2', 'section-label',
@@ -231,9 +236,12 @@ function settlementSection(detail) {
     const main = el('div', 'row-main')
     mount(main, el('h4', 'row-title', `${r.fromName} pays ${r.toName}`))
     if (r.paid) main.appendChild(el('p', 'row-sub', 'Paid'))
-    const amount = el('span', `money money-${r.paid ? 'flat' : 'down'}`,
-      formatMoney(r.amountCents, detail.game.currency))
-    mount(row, main, amount)
+    const right = el('div', 'row-right')
+    right.appendChild(el('span', `money money-${r.paid ? 'flat' : 'down'}`,
+      formatMoney(r.amountCents, detail.game.currency)))
+    // Only a stored row can be ticked; a live preview has no row to tick yet.
+    if (r.id) right.appendChild(paidToggle(r, reload))
+    mount(row, main, right)
     list.appendChild(row)
   }
   wrap.appendChild(list)
@@ -255,9 +263,161 @@ function storedRows(detail) {
   return [...detail.settlements]
     .sort((a, b) => b.amount_cents - a.amount_cents)
     .map((s) => ({
+      id: s.id,
       fromName: nameOf.get(s.from_player_id) ?? 'Removed player',
       toName: nameOf.get(s.to_player_id) ?? 'Removed player',
       amountCents: s.amount_cents,
       paid: s.status === 'paid',
     }))
+}
+
+
+function paidToggle(row, reload) {
+  const btn = button(row.paid ? 'Paid' : 'Mark paid', async () => {
+    btn.disabled = true
+    clearBanner()
+    try {
+      await setSettlementPaid(row.id, !row.paid)
+      await reload()
+    } catch (e) {
+      btn.disabled = false
+      showError(`Could not change that payment: ${e.message ?? e}`)
+    }
+  }, `btn-rebuy${row.paid ? ' btn-on' : ''}`)
+  btn.setAttribute('aria-pressed', String(row.paid))
+  return btn
+}
+
+/** Finishing, reopening, sharing, deleting, and seating someone new. */
+function actionsSection(detail, reload) {
+  const { game } = detail
+  const wrap = el('div', 'stack-tight actions')
+  const paidCount = detail.settlements.filter((s) => s.status === 'paid').length
+
+  if (game.status === 'live') {
+    wrap.appendChild(button('Add a player', () => seatSheet(detail, reload), 'btn'))
+
+    const finish = button('Finish & settle', async () => {
+      // Finishing REPLACES the stored settlement, so a second finish destroys paid ticks.
+      // Never do that without saying how many.
+      const warning = paidCount > 0
+        ? `\n\nThis replaces the stored settlement and CLEARS ${paidCount} paid `
+          + `${paidCount === 1 ? 'tick' : 'ticks'}.`
+        : ''
+      const stillOut = detail.inPlayCents !== 0
+        ? `${formatMoney(detail.inPlayCents, game.currency)} is still in play `
+          + '- not everyone has cashed out.\n\nFinish anyway?'
+        : `Finish "${game.name}" and settle up?`
+      if (!confirm(stillOut + warning)) return
+
+      finish.disabled = true
+      finish.textContent = 'Settling...'
+      clearBanner()
+      try {
+        await finishGame(game.id)
+        await reload()
+      } catch (e) {
+        finish.disabled = false
+        finish.textContent = 'Finish & settle'
+        showError(`The game was NOT settled: ${e.message ?? e}`)
+      }
+    }, 'btn btn-primary')
+    wrap.appendChild(finish)
+  } else {
+    const reopen = button('Reopen this game', async () => {
+      const note = paidCount > 0
+        ? `\n\nThe ${paidCount} paid ${paidCount === 1 ? 'tick' : 'ticks'} survive reopening. `
+          + 'Finishing a second time is what replaces them.'
+        : ''
+      if (!confirm(`Put "${game.name}" back into play?` + note)) return
+      reopen.disabled = true
+      clearBanner()
+      try {
+        await reopenGame(game.id)
+        await reload()
+      } catch (e) {
+        reopen.disabled = false
+        showError(`Could not reopen that game: ${e.message ?? e}`)
+      }
+    }, 'btn-link')
+    wrap.appendChild(reopen)
+  }
+
+  if (game.ledger_slug) {
+    wrap.appendChild(button('Share ledger', () => shareLedger(game), 'btn'))
+  }
+
+  const del = button('Delete this game', async () => {
+    if (!confirm(`Delete "${game.name}"?\n\nEvery buy-in, cash-out and settlement for it is `
+      + 'removed permanently. This cannot be undone.')) return
+    del.disabled = true
+    clearBanner()
+    try {
+      await deleteGame(game.id)
+      location.hash = '#/history'
+    } catch (e) {
+      del.disabled = false
+      showError(`Could not delete that game: ${e.message ?? e}`)
+    }
+  }, 'btn-link btn-danger')
+  wrap.appendChild(del)
+
+  return wrap
+}
+
+/**
+ * Hands off to the OS share sheet where there is one, the clipboard where there is not.
+ * This never sends anything: the host picks the app and presses send themselves.
+ */
+async function shareLedger(game) {
+  const text = ledgerMessage({ name: game.name, ledgerSlug: game.ledger_slug })
+  try {
+    if (navigator.share) {
+      await navigator.share({ text, url: ledgerUrl({ ledgerSlug: game.ledger_slug }) })
+      return
+    }
+    await navigator.clipboard.writeText(text)
+    showNotice('Link copied to the clipboard.')
+  } catch (e) {
+    // AbortError just means the host closed the share sheet. That is not a failure.
+    if (e && e.name === 'AbortError') return
+    showError(`Could not share that link: ${e.message ?? e}`)
+  }
+}
+
+/** Seat someone from the roster. Anyone already at the table is not offered again. */
+async function seatSheet(detail, reload) {
+  const body = el('div', 'sheet-body')
+  const dlg = sheet('Add a player', body)
+  body.appendChild(el('p', 'muted', 'Loading...'))
+  try {
+    const roster = await players()
+    const seated = new Set(detail.seats.map((s) => s.player.id))
+    const free = roster.filter((p) => !seated.has(p.id))
+    clear(body)
+    if (free.length === 0) {
+      body.appendChild(el('p', 'muted', 'Everyone in your list is already at this table.'))
+      return
+    }
+    const list = el('div', 'list')
+    for (const p of free) {
+      const btn = button(p.name, async () => {
+        btn.disabled = true
+        clearBanner()
+        try {
+          await seatPlayer(detail.game.id, p.id, detail.seats.length)
+          dlg.close()
+          await reload()
+        } catch (e) {
+          btn.disabled = false
+          showError(`${p.name} was NOT seated: ${e.message ?? e}`)
+        }
+      }, 'btn')
+      list.appendChild(btn)
+    }
+    body.appendChild(list)
+  } catch (e) {
+    clear(body)
+    body.appendChild(el('p', 'muted', `Could not load your players: ${e.message ?? e}`))
+  }
 }

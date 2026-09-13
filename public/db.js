@@ -3,6 +3,8 @@
 // Same project as the Android app, and every table's RLS keys on auth.uid(), so signing in
 // as the same account IS the linkage. There is no sync layer and nothing to migrate.
 
+import { settle } from './lib/money.js'
+
 const SUPABASE_URL = 'https://sdslqdlmputkhadbrtnm.supabase.co'
 // Publishable, not secret: `anon` has no table grants at all, so possession of this grants
 // nothing. Every row the app reads is reached with the signed-in user's own token.
@@ -257,3 +259,92 @@ export async function addEntry({
 export const standingsOf = (detail) => detail.seats.map((s) => ({
   playerId: s.player.id, name: s.player.name, netCents: s.netCents,
 }))
+
+/**
+ * A new game. `id`, `ledger_slug`, `started_at` and `status` are all defaulted by Postgres
+ * (`gen_ledger_slug()` mints the slug), so the client sends only what the host typed.
+ */
+export const createGame = ({
+  name, gameType = 'cash', playedOn, smallBlindCents = null, bigBlindCents = null,
+  currency = 'GBP', location = null,
+}) => authed(() => q(client.from('games').insert({
+  host_id: uid(),
+  name,
+  game_type: gameType,
+  played_on: playedOn,
+  small_blind_cents: smallBlindCents,
+  big_blind_cents: bigBlindCents,
+  currency,
+  location,
+}).select().single()))
+
+export const deleteGame = (id) => authed(() => q(client.from('games').delete().eq('id', id)))
+
+export const seatPlayer = (gameId, playerId, seatOrder) => authed(() => q(
+  client.from('game_players')
+    .insert({ game_id: gameId, player_id: playerId, seat_order: seatOrder })
+    .select().single(),
+))
+
+export const unseatPlayer = (gamePlayerId) => authed(() => q(
+  client.from('game_players').delete().eq('id', gamePlayerId),
+))
+
+export const deleteEntry = (entryId) => authed(() => q(
+  client.from('entries').delete().eq('id', entryId),
+))
+
+/**
+ * Freezes the game: computes the settlement once and stores it, so the numbers players were
+ * shown can never drift afterwards.
+ *
+ * ponytail: three statements, not a transaction. Postgrest cannot do one, and an RPC would
+ * be a migration this port does not otherwise need. The window is small and the failure is
+ * recoverable — re-running finish recomputes from the entries, which are the source of truth.
+ * What it CANNOT recover is `paid` ticks, which is exactly why finishing a second time is
+ * confirmed with a count of how many it will clear.
+ */
+export async function finishGame(gameId) {
+  const detail = await gameDetail(gameId)
+  const transfers = settle(standingsOf(detail))
+  return authed(async () => {
+    await q(client.from('settlements').delete().eq('game_id', gameId))
+    if (transfers.length > 0) {
+      await q(client.from('settlements').insert(transfers.map((t) => ({
+        game_id: gameId,
+        from_player_id: t.fromId,
+        to_player_id: t.toId,
+        amount_cents: t.amountCents,
+      }))))
+    }
+    await q(client.from('games')
+      .update({ status: 'settled', finished_at: new Date().toISOString() })
+      .eq('id', gameId))
+    return transfers
+  })
+}
+
+/**
+ * Puts a finished game back into play - the way out of a mis-tapped Finish.
+ *
+ * Settlements are deliberately LEFT ALONE rather than deleted here. Reopening by accident
+ * loses nothing; it is finishing again that replaces them, paid ticks and all.
+ */
+export const reopenGame = (gameId) => authed(() => q(
+  client.from('games').update({ status: 'live', finished_at: null }).eq('id', gameId),
+))
+
+export const setSettlementPaid = (settlementId, paid) => authed(() => q(
+  client.from('settlements').update({
+    status: paid ? 'paid' : 'pending',
+    paid_at: paid ? new Date().toISOString() : null,
+  }).eq('id', settlementId),
+))
+
+/** How many games a player has ever been seated in - the delete guard on the roster. */
+export async function playerGameCount(playerId) {
+  const rows = await authed(() => q(
+    client.from('game_players').select('id', { count: 'exact' }).eq('player_id', playerId),
+  ))
+  return rows.length
+}

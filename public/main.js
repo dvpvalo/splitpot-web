@@ -8,6 +8,7 @@ import { button, clearBanner, clear, el, mount, showNotice } from './ui.js'
 import { gameView } from './views/game.js'
 import { historyView } from './views/history.js'
 import { homeView } from './views/home.js'
+import { newGameView } from './views/newgame.js'
 import { peopleView } from './views/people.js'
 import { signinView } from './views/signin.js'
 
@@ -51,6 +52,12 @@ function render() {
 
   if (state === SIGNED_OUT) {
     app.appendChild(signinView())
+    return
+  }
+
+  if (location.hash === '#/new') {
+    swap(newGameView())
+    app.appendChild(tabBar(null))
     return
   }
 

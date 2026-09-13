@@ -4,7 +4,7 @@
 // Every write here is awaited against the server before anything redraws. A failure raises a
 // banner naming the player and the amount, with Retry; it never fails quietly.
 
-import { addEntry, gameDetail, standingsOf } from '../db.js'
+import { addEntry, gameChanges, gameDetail, standingsOf } from '../db.js'
 import { formatMoney, settle } from '../lib/money.js'
 import { durationLabel, longDate, parseInstant, relativeLabel } from '../lib/time.js'
 import { button, clear, clearBanner, el, money, mount, showError } from '../ui.js'
@@ -15,22 +15,46 @@ export function gameView(gameId) {
   const body = el('div', 'stack')
   root.appendChild(body)
 
-  const load = async () => {
-    clear(body)
-    body.appendChild(el('p', 'muted', 'Loading…'))
+  // Which panel is open lives out here so it survives a repaint. A buy-in arriving from the
+  // phone must not throw the host back to Players while they are reading the Timeline.
+  const ui = { showing: 'players' }
+
+  const load = async (quiet = false) => {
+    if (!quiet) {
+      clear(body)
+      body.appendChild(el('p', 'muted', 'Loading…'))
+    }
     try {
       const detail = await gameDetail(gameId)
       clear(body)
       mount(body,
         header(detail),
         meter(detail),
-        seatSection(detail, load),
+        seatSection(detail, () => load(true), ui),
         settlementSection(detail),
       )
     } catch (e) {
+      // A failed background refresh must never blank a table that is already on screen and
+      // being read at an actual table. The visible numbers stay; the next event retries.
+      if (quiet) return
       clear(body)
-      showError(`Could not load that game: ${e.message ?? e}`, load)
+      showError(`Could not load that game: ${e.message ?? e}`, () => load())
     }
+  }
+
+  // One buy-in can produce more than one event, and a burst must not become a burst of
+  // fetches. Coalesce into a single refresh.
+  let timer = null
+  const refresh = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => load(true), 150)
+  }
+
+  const unsubscribe = gameChanges(gameId, refresh)
+  // main.js calls this before swapping screens; without it every visit leaks a channel.
+  root.destroy = () => {
+    clearTimeout(timer)
+    unsubscribe()
   }
 
   load()
@@ -78,21 +102,19 @@ function meter(detail) {
   return wrap
 }
 
-function seatSection(detail, reload) {
+function seatSection(detail, reload, ui) {
   const wrap = el('div', 'stack-tight')
   const tabs = el('div', 'pills')
   const panel = el('div', 'list')
-
-  let showing = 'players'
   const draw = () => {
     clear(tabs)
     for (const [key, label] of [['players', 'Players'], ['timeline', 'Timeline']]) {
-      const b = button(label, () => { showing = key; draw() }, `chip${showing === key ? ' chip-on' : ''}`)
-      b.setAttribute('aria-pressed', String(showing === key))
+      const b = button(label, () => { ui.showing = key; draw() }, `chip${ui.showing === key ? ' chip-on' : ''}`)
+      b.setAttribute('aria-pressed', String(ui.showing === key))
       tabs.appendChild(b)
     }
     clear(panel)
-    if (showing === 'players') {
+    if (ui.showing === 'players') {
       if (detail.seats.length === 0) panel.appendChild(el('p', 'muted', 'Nobody seated yet.'))
       for (const s of detail.seats) panel.appendChild(seatRow(s, detail, reload))
     } else {

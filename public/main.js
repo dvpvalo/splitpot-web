@@ -13,6 +13,15 @@ import { signinView } from './views/signin.js'
 
 const app = document.getElementById('app')
 
+// A screen may hold a live subscription. Tear the old one down BEFORE the next render, or
+// every navigation leaves another socket channel behind listening to a game nobody is on.
+let teardown = null
+function swap(node) {
+  teardown?.()
+  teardown = node.destroy ?? null
+  app.appendChild(node)
+}
+
 let state = LOADING
 
 const TABS = [
@@ -29,6 +38,9 @@ const GAME_ROUTE = /^#\/game\/([\w-]+)$/
 function render() {
   clear(app)
 
+  teardown?.()
+  teardown = null
+
   if (state === LOADING) {
     // Three states, not two. Rendering the sign-in screen while the stored session is still
     // being read would flash a login form at a host who is already signed in, every cold
@@ -44,13 +56,13 @@ function render() {
 
   const game = GAME_ROUTE.exec(location.hash)
   if (game) {
-    app.appendChild(gameView(game[1]))
+    swap(gameView(game[1]))
     app.appendChild(tabBar(null))
     return
   }
 
   const active = routeFor(location.hash)
-  app.appendChild(active.view())
+  swap(active.view())
   app.appendChild(tabBar(active))
 }
 

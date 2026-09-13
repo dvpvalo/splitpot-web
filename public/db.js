@@ -192,6 +192,39 @@ export async function gameDetail(gameId) {
   })
 }
 
+// ---------- realtime ----------
+
+/**
+ * Calls `onChange` whenever anything in this game changes, so the ledger stays live across
+ * devices. Returns an unsubscribe function - call it when leaving the screen, or every
+ * navigation leaks a socket subscription.
+ *
+ * `games` is watched too, which the Android version does not do: the publication carries it,
+ * so finishing a game on the phone flips the browser out of live preview for free.
+ */
+export function gameChanges(gameId, onChange) {
+  const channel = client.channel(`game:${gameId}`)
+
+  const watch = (table, filter) => channel.on(
+    'postgres_changes', { event: '*', schema: 'public', table, filter }, onChange,
+  )
+  watch('entries', `game_id=eq.${gameId}`)
+  watch('game_players', `game_id=eq.${gameId}`)
+  watch('settlements', `game_id=eq.${gameId}`)
+  watch('games', `id=eq.${gameId}`)
+
+  // The socket carries its own auth. Without a token the server applies RLS as `anon`,
+  // which has no table grants here, so the subscription would connect cleanly and then
+  // simply never deliver a row - a silent failure that looks like "realtime doesn't work".
+  sessionReady.then(({ data }) => {
+    const token = data.session?.access_token
+    if (token) client.realtime.setAuth(token)
+    channel.subscribe()
+  })
+
+  return () => client.removeChannel(channel)
+}
+
 // ---------- writes ----------
 
 /**

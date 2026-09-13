@@ -94,7 +94,11 @@ watchAuth((next, session, meta) => {
   }
   const changed = next !== state
   state = next
-  if (state === SIGNED_IN) clearBanner()
+  // ONLY on a real transition back to signed-in, which is what clears a "connection lost"
+  // notice. This used to fire on every auth callback, TOKEN_REFRESHED included - so a token
+  // refresh landing at the wrong moment silently wiped whatever was in the banner. That is
+  // fine for a notice and unacceptable for "your buy-in was NOT saved".
+  if (changed && state === SIGNED_IN) clearBanner()
   if (changed) render()
 })
 

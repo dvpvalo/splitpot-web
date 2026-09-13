@@ -192,6 +192,34 @@ export async function gameDetail(gameId) {
   })
 }
 
+// ---------- writes ----------
+
+/**
+ * A buy-in or a cash-out. The first thing in this app that spends money.
+ *
+ * Awaited against the server, and nothing renders as saved until it returns. There is no
+ * optimistic rendering on any money path and no offline queue in this build: the phone
+ * already covers the no-signal case, and a web write that LOOKS saved but never arrived is
+ * worse than one that visibly failed. A failure raises a banner naming the action, and the
+ * sheet keeps the typed amount so the host can retry rather than retype.
+ */
+export async function addEntry({
+  gameId, gamePlayerId, kind, amountCents, paid = false, paidToPlayerId = null,
+}) {
+  if (!Number.isInteger(amountCents) || amountCents <= 0) {
+    throw new Error('amount must be a positive whole number of minor units')
+  }
+  if (kind !== 'buyin' && kind !== 'cashout') throw new Error(`unknown entry kind: ${kind}`)
+  return authed(() => q(client.from('entries').insert({
+    game_id: gameId,
+    game_player_id: gamePlayerId,
+    kind,
+    amount_cents: amountCents,
+    paid,
+    paid_to_player_id: paidToPlayerId,
+  })))
+}
+
 /** The live preview uses the same shape that finishing the game will commit. */
 export const standingsOf = (detail) => detail.seats.map((s) => ({
   playerId: s.player.id, name: s.player.name, netCents: s.netCents,

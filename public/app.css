@@ -383,3 +383,48 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
 }
 
 .tag-settled { color: var(--muted); }
+
+/* ---------- keypad sheet ---------- */
+
+.sheet-sub { margin: 0 0 12px; color: var(--muted); }
+
+.amount-display {
+  margin: 16px 0;
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.key {
+  width: 100%;
+  margin: 0;
+  min-height: 56px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  /* A fast double-tap on a quick chip must log two entries, not zoom the page. */
+  touch-action: manipulation;
+}
+
+.btn-rebuy {
+  width: auto;
+  margin: 6px 0 0;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  touch-action: manipulation;
+}

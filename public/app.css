@@ -451,3 +451,6 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
 
 .actions { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); gap: 4px; }
 .actions .btn-link { align-self: flex-start; }
+
+/* Historical rows: present for reference, not the thing being acted on. */
+.row-quiet { opacity: 0.72; }

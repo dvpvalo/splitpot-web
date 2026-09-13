@@ -227,30 +227,68 @@ function settlementSection(detail, reload) {
 
   if (rows.length === 0) {
     wrap.appendChild(el('p', 'muted', "Nothing to settle — everyone's square."))
-    return wrap
+  } else {
+    const list = el('div', 'list')
+    for (const r of rows) {
+      const row = el('div', 'row')
+      const main = el('div', 'row-main')
+      mount(main, el('h4', 'row-title', `${r.fromName} pays ${r.toName}`))
+      if (r.paid) main.appendChild(el('p', 'row-sub', 'Paid'))
+      const right = el('div', 'row-right')
+      right.appendChild(el('span', `money money-${r.paid ? 'flat' : 'down'}`,
+        formatMoney(r.amountCents, detail.game.currency)))
+      // Only a stored row can be ticked; a live preview has no row to tick yet.
+      if (r.id) right.appendChild(paidToggle(r, reload))
+      mount(row, main, right)
+      list.appendChild(row)
+    }
+    wrap.appendChild(list)
   }
-
-  const list = el('div', 'list')
-  for (const r of rows) {
-    const row = el('div', 'row')
-    const main = el('div', 'row-main')
-    mount(main, el('h4', 'row-title', `${r.fromName} pays ${r.toName}`))
-    if (r.paid) main.appendChild(el('p', 'row-sub', 'Paid'))
-    const right = el('div', 'row-right')
-    right.appendChild(el('span', `money money-${r.paid ? 'flat' : 'down'}`,
-      formatMoney(r.amountCents, detail.game.currency)))
-    // Only a stored row can be ticked; a live preview has no row to tick yet.
-    if (r.id) right.appendChild(paidToggle(r, reload))
-    mount(row, main, right)
-    list.appendChild(row)
-  }
-  wrap.appendChild(list)
 
   if (live && detail.inPlayCents !== 0) {
     wrap.appendChild(el('p', 'muted small',
       `${formatMoney(detail.inPlayCents, detail.game.currency)} still in play. `
       + 'The preview settles only what has been cashed out.'))
   }
+
+  // Deliberately OUTSIDE the branch above: a reopened game where everyone is square has no
+  // preview rows at all, and that is exactly when a forgotten payment would go missing.
+  if (live) wrap.appendChild(alreadyPaid(detail))
+
+  return wrap
+}
+
+/**
+ * Payments recorded against the PREVIOUS settlement of a game that has since been reopened.
+ *
+ * A live game renders the computed preview, which has no paid state, so without this a
+ * payment someone has already handed over simply vanishes from the screen until the game is
+ * finished again. The row is still in the database — this says so, and names who, because
+ * "has Yash actually paid me yet" is the question being asked at the table.
+ */
+function alreadyPaid(detail) {
+  const wrap = el('div', 'stack-tight')
+  const paid = detail.settlements.filter((s) => s.status === 'paid')
+  if (paid.length === 0) return wrap
+
+  const nameOf = new Map(detail.seats.map((s) => [s.player.id, s.player.name]))
+  wrap.appendChild(el('h3', 'section-label', 'Already paid'))
+  wrap.appendChild(el('p', 'muted small',
+    'Recorded against this game\u2019s previous settlement and still on record. '
+    + 'Finishing again is what replaces them.'))
+
+  const list = el('div', 'list')
+  for (const s of [...paid].sort((a, b) => b.amount_cents - a.amount_cents)) {
+    const row = el('div', 'row row-quiet')
+    const main = el('div', 'row-main')
+    mount(main, el('h4', 'row-title',
+      `${nameOf.get(s.from_player_id) ?? 'Removed player'} paid `
+      + `${nameOf.get(s.to_player_id) ?? 'Removed player'}`))
+    mount(row, main, el('span', 'money money-flat',
+      formatMoney(s.amount_cents, detail.game.currency)))
+    list.appendChild(row)
+  }
+  wrap.appendChild(list)
   return wrap
 }
 

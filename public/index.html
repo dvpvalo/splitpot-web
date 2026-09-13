@@ -1,13 +1,22 @@
 <!doctype html>
+<html lang="en" data-theme="system">
+<head>
 <meta charset="utf-8">
+<!-- Without this a mobile browser renders at 980px and scales down: the single line that
+     makes every responsive rule in app.css actually apply. -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Splitpot - keep score at home poker games.">
 <title>Splitpot</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; min-height: 100dvh; display: grid; place-content: center;
-         text-align: center; font: 16px/1.5 system-ui, sans-serif; padding: 24px; }
-  h1 { font-size: 2rem; margin: 0 0 .5rem; letter-spacing: -.02em; }
-  p { margin: 0; opacity: .7; }
-</style>
-<h1>Splitpot</h1>
-<p>The web app is being built.</p>
+<!-- Relative, never root-relative, so the folder stays portable between hosts. -->
+<link rel="stylesheet" href="app.css">
+<!-- Vendored UMD build: defines the `supabase` global. Must load before any module that
+     reads it, so it is a plain blocking script rather than type="module". -->
+<script src="vendor/supabase.js"></script>
+</head>
+<body>
+<div id="banner" class="banner" hidden></div>
+<div id="app"><div class="loading">Loading&hellip;</div></div>
+<script type="module" src="main.js"></script>
+<noscript><p class="loading">Splitpot needs JavaScript to show your ledger.</p></noscript>
+</body>
+</html>

@@ -1,0 +1,205 @@
+/* Splitpot on the web.
+ *
+ * The responsive rules are written from the start rather than added as a coat of paint at
+ * the end: the layout is fluid, there is no framework and no device detection, and the same
+ * markup serves a phone, a tablet either way up, and a desktop.
+ *
+ * Themes are data-theme on <html>, mirroring ThemePref's five choices. Phase 1 ships the
+ * first three; felt and paper arrive with the picker in Phase 8. Money colours are their own
+ * variables and are NEVER derived from --primary - that is the whole point of
+ * LocalMoneyColors on the phone.
+ */
+
+:root,
+[data-theme='system'],
+[data-theme='midnight'] {
+  --bg: #0e0f11;
+  --surface: #17181c;
+  --line: #26282e;
+  --text: #f2f3f5;
+  --muted: #9aa0aa;
+  --primary: #f2f3f5;
+  --on-primary: #0e0f11;
+  --up: #46c46b;
+  --down: #ef5b5b;
+  --flat: #9aa0aa;
+  --danger: #ef5b5b;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme='system'] {
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --line: #e2e2dd;
+    --text: #16171a;
+    --muted: #6b7079;
+    --primary: #16171a;
+    --on-primary: #ffffff;
+    --up: #1c8c3f;
+    --down: #c62828;
+    --flat: #6b7079;
+    --danger: #c62828;
+    color-scheme: light;
+  }
+}
+
+[data-theme='daylight'] {
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --line: #e2e2dd;
+  --text: #16171a;
+  --muted: #6b7079;
+  --primary: #16171a;
+  --on-primary: #ffffff;
+  --up: #1c8c3f;
+  --down: #c62828;
+  --flat: #6b7079;
+  --danger: #c62828;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+/* Any class here that sets `display` beats the browser's own [hidden] rule, so .field and
+ * .btn silently un-hide themselves. Everything in this app toggles visibility with
+ * el.hidden, so this rule is what makes that mean anything. */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  /* dvh, not vh: mobile browsers count the URL bar in 100vh, which leaves anything pinned
+     to the bottom sitting below the fold until you scroll. */
+  min-height: 100dvh;
+}
+
+#app {
+  /* One column, capped and centred. A seat row stretched across an iPad - name at one end,
+     number at the other - is unreadable, so the column stops growing instead. */
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+}
+
+.loading {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* ---------- banner ---------- */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+}
+
+.banner-error { background: var(--danger); color: #fff; }
+.banner-notice { background: var(--surface); color: var(--muted); border-bottom: 1px solid var(--line); }
+
+/* ---------- type ---------- */
+
+.title { font-size: 1.5rem; margin: 0; letter-spacing: -0.02em; }
+.wordmark { font-size: 2rem; margin: 0 0 4px; letter-spacing: -0.03em; }
+.sub { margin: 0 0 24px; color: var(--muted); }
+.muted { color: var(--muted); }
+.small { font-size: 0.875rem; }
+
+.screen-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* ---------- controls ---------- */
+
+.btn, .btn-link, .btn-inline {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  /* 44px minimum: this gets used at a real table, at night, one-handed, with people
+     waiting. Anything smaller is a mis-tap. */
+  min-height: 44px;
+  padding: 0 16px;
+  /* Without this a fast double-tap zooms the page instead of registering twice. */
+  touch-action: manipulation;
+}
+
+.btn { display: block; width: 100%; margin-bottom: 12px; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn-primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); font-weight: 600; }
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  padding: 0;
+  min-height: 44px;
+}
+
+.btn-inline { min-height: 36px; padding: 0 12px; margin-left: auto; }
+
+.field {
+  display: block;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  /* 16px minimum, always. iOS Safari zooms the page on focus for anything smaller and does
+     not zoom back out. The amount fields are where this bites first. */
+  font-size: 16px;
+}
+
+/* ---------- cards and rows ---------- */
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
+.card-signin { margin-top: 12dvh; }
+
+.list { display: flex; flex-direction: column; gap: 8px; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.row-main { flex: 1; min-width: 0; }
+.row-title { font-size: 1rem; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.row-sub { margin: 2px 0 0; color: var(--muted); font-size: 0.875rem; }
+
+.tag {
+  flex: none;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.tag-live { color: var(--up); border-color: var(--up); }

@@ -660,6 +660,10 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
     align-self: start;
   }
 
+  /* Six wide, two deep. The 3x4 phone grid is 200px tall and that left the bottom row -
+     including ZERO - below the fold, which breaks typing 200. Landscape has width to spare
+     and no height, so the keypad turns on its side rather than losing its keys. */
+  .keypad { grid-template-columns: repeat(6, 1fr); margin: 0; }
   .key { min-height: 44px; }
 
   /* Two columns alone was not enough - the submit button still sat a few pixels below the

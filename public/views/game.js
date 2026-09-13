@@ -360,8 +360,8 @@ function actionsSection(detail, reload) {
   } else {
     const reopen = button('Reopen this game', async () => {
       const note = paidCount > 0
-        ? `\n\nThe ${paidCount} paid ${paidCount === 1 ? 'tick' : 'ticks'} survive reopening. `
-          + 'Finishing a second time is what replaces them.'
+        ? `\n\nThe ${paidCount} paid ${paidCount === 1 ? 'tick survives' : 'ticks survive'} `
+          + 'reopening. Finishing a second time is what replaces them.'
         : ''
       if (!confirm(`Put "${game.name}" back into play?` + note)) return
       reopen.disabled = true

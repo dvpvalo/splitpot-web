@@ -325,7 +325,16 @@ function blindClock(gameId) {
   return wrap
 }
 
-/** One tap, one buy-in. Still awaited against the server before anything redraws. */
+/**
+ * One tap, one buy-in. Still awaited against the server before anything redraws.
+ *
+ * The button disables itself for the whole write, so a fast double-tap logs ONE buy-in and
+ * the second tap is swallowed. That is deliberate and the user confirmed it on 13 Sep 2026
+ * after it was measured on the phone: at a real table a second tap 90ms into the same button
+ * is a fat finger, not a decision to hand over another ₹20, and the safe way to be wrong
+ * about that is downwards. Two taps a moment apart still log two - verified on the device.
+ * Do not "fix" this into a queue.
+ */
 async function rebuy(btn, seat, detail, amountCents, reload) {
   const label = btn.textContent
   btn.disabled = true

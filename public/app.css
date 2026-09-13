@@ -750,8 +750,6 @@ a.card:not(.row) { flex-direction: column; gap: 4px; align-items: flex-start; }
   background: var(--brass-hi);
   transition: width 150ms ease-out;
 }
-/* Squared up: the bar turns the win colour rather than staying brass. */
-.meter-done { background: var(--seat-up); }
 
 /* A place at the table: the chip, a name plate, and the one-tap rebuy under it. */
 .seat {

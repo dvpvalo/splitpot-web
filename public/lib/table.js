@@ -99,8 +99,8 @@ export function rackEdges(seats) {
   const most = Math.max(0, ...seats.map((s) => s.buyInCents + s.cashOutCents))
   const edges = (cents) => (cents > 0 ? Math.max(1, Math.round((cents / most) * RACK_MAX)) : 0)
   return seats.map((s) => {
-    const out = edges(s.cashOutCents)
-    return { in: Math.min(edges(s.buyInCents), RACK_MAX - Math.min(out, RACK_MAX - 1)), out: Math.min(out, RACK_MAX - 1) }
+    const out = Math.min(edges(s.cashOutCents), RACK_MAX - 1)
+    return { in: Math.min(edges(s.buyInCents), RACK_MAX - out), out }
   })
 }
 

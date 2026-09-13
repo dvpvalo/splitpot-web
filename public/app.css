@@ -290,7 +290,9 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   flex: none;
   width: auto;
   margin: 0;
-  min-height: 40px;
+  /* 44, not 40: used at a real table, at night, one-handed, with people waiting. The quick
+     amounts on the keypad are the most-tapped controls in the app. */
+  min-height: 44px;
   border-radius: 999px;
   padding: 0 14px;
 }
@@ -522,6 +524,25 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   color: var(--on-primary);
   font-size: 0.75rem;
   font-weight: 700;
+}
+
+/* ---------- seats and timeline ---------- */
+
+.panel-label { display: none; }
+.panel-off { display: none; }
+
+/* From here up there is room for both lists, and a landscape tablet is the one place the
+   timeline earns its own column. The toggle goes away because it has nothing left to do. */
+@media (min-width: 900px) {
+  .seats .pills { display: none; }
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .panel-off { display: block; }
+  .panel-label { display: block; margin-bottom: 8px; }
 }
 
 /* ---------- theme picker ---------- */

@@ -127,10 +127,30 @@ function meter(detail) {
   return wrap
 }
 
+/**
+ * Seats and timeline. One at a time on a phone, both at once from ~900px up.
+ *
+ * BOTH panels are always built and CSS decides which are shown - no JS breakpoint, no resize
+ * listener, and rotating a tablet needs no re-render. A landscape tablet is the one layout
+ * where the timeline genuinely earns its own column; on a phone it would halve two lists that
+ * are already narrow.
+ */
 function seatSection(detail, reload, ui) {
-  const wrap = el('div', 'stack-tight')
+  const wrap = el('div', 'stack-tight seats')
   const tabs = el('div', 'pills')
-  const panel = el('div', 'list')
+  const panels = el('div', 'panels')
+
+  const column = (label) => {
+    const col = el('div', 'panel')
+    col.appendChild(el('h3', 'section-label panel-label', label))
+    const list = el('div', 'list')
+    col.appendChild(list)
+    return [col, list]
+  }
+  const [playersCol, playersList] = column('Players')
+  const [timelineCol, timelineList] = column('Timeline')
+  mount(panels, playersCol, timelineCol)
+
   const draw = () => {
     clear(tabs)
     for (const [key, label] of [['players', 'Players'], ['timeline', 'Timeline']]) {
@@ -138,20 +158,23 @@ function seatSection(detail, reload, ui) {
       b.setAttribute('aria-pressed', String(ui.showing === key))
       tabs.appendChild(b)
     }
-    clear(panel)
-    if (ui.showing === 'players') {
-      if (detail.seats.length === 0) panel.appendChild(el('p', 'muted', 'Nobody seated yet.'))
-      const showDealer = dealerEnabled() && detail.game.status === 'live' && detail.seats.length > 0
-      if (showDealer) panel.appendChild(dealerRow(detail, draw))
-      const holder = showDealer ? storedDealer(detail.game.id) : null
-      for (const s of detail.seats) panel.appendChild(seatRow(s, detail, reload, holder))
-    } else {
-      timeline(detail).forEach((row) => panel.appendChild(row))
-    }
+
+    clear(playersList)
+    if (detail.seats.length === 0) playersList.appendChild(el('p', 'muted', 'Nobody seated yet.'))
+    const showDealer = dealerEnabled() && detail.game.status === 'live' && detail.seats.length > 0
+    if (showDealer) playersList.appendChild(dealerRow(detail, draw))
+    const holder = showDealer ? storedDealer(detail.game.id) : null
+    for (const s of detail.seats) playersList.appendChild(seatRow(s, detail, reload, holder))
+
+    clear(timelineList)
+    timeline(detail).forEach((row) => timelineList.appendChild(row))
+
+    playersCol.className = `panel${ui.showing === 'players' ? '' : ' panel-off'}`
+    timelineCol.className = `panel${ui.showing === 'timeline' ? '' : ' panel-off'}`
   }
 
   draw()
-  mount(wrap, tabs, panel)
+  mount(wrap, tabs, panels)
   return wrap
 }
 

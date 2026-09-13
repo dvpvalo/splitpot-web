@@ -452,7 +452,10 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
 .btn-rebuy {
   width: auto;
   margin: 6px 0 0;
-  min-height: 34px;
+  /* 44, not 34. Measured on the real phone: this was the ONE control on the live table under
+     the rule, and it is the one tapped 70 times a night, one-handed, at a table, in the dark.
+     The row grows a few pixels; that is the right way round. */
+  min-height: 44px;
   padding: 0 14px;
   border-radius: 999px;
   font-size: 0.875rem;

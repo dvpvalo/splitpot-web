@@ -669,4 +669,16 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   .sheet-head { padding-top: 10px; padding-bottom: 10px; }
   .sheet-sub { margin-bottom: 6px; }
   .amount-display { margin: 6px 0; font-size: 1.75rem; }
+
+  /* And then the real phone gave 283px, not the 375 an emulator suggested - Chrome's own
+     toolbar takes the rest - so trimming was never going to be enough. The submit button
+     pins itself to the bottom of the sheet instead, the way the header already pins to the
+     top. Reachable at any height, which is the only property that actually matters here. */
+  .sheet-body > .btn-primary {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-bottom: 0;
+    box-shadow: 0 -10px 14px -8px rgb(0 0 0 / 0.45);
+  }
 }

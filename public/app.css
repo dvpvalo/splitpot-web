@@ -671,14 +671,12 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   .amount-display { margin: 6px 0; font-size: 1.75rem; }
 
   /* And then the real phone gave 283px, not the 375 an emulator suggested - Chrome's own
-     toolbar takes the rest - so trimming was never going to be enough. The submit button
-     pins itself to the bottom of the sheet instead, the way the header already pins to the
-     top. Reachable at any height, which is the only property that actually matters here. */
-  .sheet-body > .btn-primary {
-    position: sticky;
-    bottom: 0;
-    z-index: 1;
-    margin-bottom: 0;
-    box-shadow: 0 -10px 14px -8px rgb(0 0 0 / 0.45);
-  }
+     toolbar takes the rest - so trimming was never going to be enough.
+
+     Sticking it to the bottom was the first try and it covered the quick chips: a sticky
+     element shifted up from below the fold lands on top of whatever precedes it. So the
+     action moves to the top of the column instead, right under the header. Unusual reading
+     order, but it is always visible, never covers anything, and the button carries the
+     amount in its own label - which is what you are checking before you tap it. */
+  .sheet-body > .btn-primary { order: -1; margin: 0 0 10px; }
 }

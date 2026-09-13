@@ -6,9 +6,22 @@
      makes every responsive rule in app.css actually apply. -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Splitpot - keep score at home poker games.">
+<meta name="theme-color" content="#0e0f11">
 <title>Splitpot</title>
 <!-- Relative, never root-relative, so the folder stays portable between hosts. -->
 <link rel="stylesheet" href="app.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="icon-192.png">
+<!-- Inline and before the stylesheet renders anything, so a host who chose Paper does not
+     get a flash of Midnight on every cold start. The module that owns themes loads with the
+     rest of the app, which is far too late for this one line. -->
+<script>
+  try {
+    var t = localStorage.getItem('splitpot_theme')
+    if (t) document.documentElement.dataset.theme = t
+  } catch (e) { /* private mode: the default look is a fine fallback */ }
+</script>
 <!-- Vendored UMD build: defines the `supabase` global. Must load before any module that
      reads it, so it is a plain blocking script rather than type="module". -->
 <script src="vendor/supabase.js"></script>

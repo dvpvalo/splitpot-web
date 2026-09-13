@@ -4,7 +4,8 @@
 // to configure and a deep link cannot 404 on a static host.
 
 import { LOADING, SIGNED_IN, SIGNED_OUT, watchAuth } from './auth.js'
-import { clearNotice, clear, el, mount, showNotice } from './ui.js'
+import { apply as applyTheme, current as currentTheme, labelOf, next as nextTheme } from './theme.js'
+import { button, clearNotice, clear, el, mount, showNotice } from './ui.js'
 import { gameView } from './views/game.js'
 import { historyView } from './views/history.js'
 import { homeView } from './views/home.js'
@@ -14,6 +15,10 @@ import { settingsView } from './views/settings.js'
 import { signinView } from './views/signin.js'
 
 const app = document.getElementById('app')
+
+// index.html has already set data-theme inline, before first paint. This re-applies it
+// through the module that owns it, which is what keeps the meta theme-color in step.
+applyTheme(currentTheme())
 
 // A screen may hold a live subscription. Tear the old one down BEFORE the next render, or
 // every navigation leaves another socket channel behind listening to a game nobody is on.
@@ -54,8 +59,11 @@ function render() {
 
   if (state === SIGNED_OUT) {
     app.appendChild(signinView())
+    app.appendChild(themeCycle())
     return
   }
+
+  app.appendChild(themeCycle())
 
   if (location.hash === '#/new') {
     swap(newGameView())
@@ -73,6 +81,24 @@ function render() {
   const active = routeFor(location.hash)
   swap(active.view())
   app.appendChild(tabBar(active))
+}
+
+/**
+ * One tap through the four looks, the way the phone's top bar does it.
+ *
+ * Deliberately does NOT re-render: a theme is custom properties, so changing the attribute
+ * repaints everything for free. Re-rendering here would tear down the live game screen and
+ * its realtime subscription to change a colour.
+ */
+function themeCycle() {
+  const b = button('◐', () => { applyTheme(nextTheme()); label() }, 'btn theme-cycle')
+  function label() {
+    const target = labelOf(nextTheme())
+    b.title = `Switch to ${target}`
+    b.setAttribute('aria-label', `Switch to ${target}`)
+  }
+  label()
+  return b
 }
 
 function tabBar(active) {

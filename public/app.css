@@ -4,10 +4,10 @@
  * the end: the layout is fluid, there is no framework and no device detection, and the same
  * markup serves a phone, a tablet either way up, and a desktop.
  *
- * Themes are data-theme on <html>, mirroring ThemePref's five choices. Phase 1 ships the
- * first three; felt and paper arrive with the picker in Phase 8. Money colours are their own
- * variables and are NEVER derived from --primary - that is the whole point of
- * LocalMoneyColors on the phone.
+ * Themes are data-theme on <html>, mirroring ThemePref's five choices. Money colours are
+ * their own variables in every one of them and are NEVER derived from --primary - that is
+ * the whole point of LocalMoneyColors on the phone, and it is what makes Paper's rule (stamp
+ * red for losses and errors, ink for buttons) fall out for free.
  */
 
 :root,
@@ -56,6 +56,41 @@
   --down: #c62828;
   --flat: #6b7079;
   --danger: #c62828;
+  color-scheme: light;
+}
+
+/* Neon Felt: the card room. Deep cloth, brass trim, bone type - and money left as the only
+   other colour on the table. */
+[data-theme='felt'] {
+  --bg: #0b1f18;
+  --surface: #10291f;
+  --line: #1c3b2e;
+  --text: #f2efe6;
+  --muted: #8fa79b;
+  --primary: #c9a227;
+  --on-primary: #04120d;
+  --up: #3dffa8;
+  --down: #ff4d6d;
+  --flat: #8fa79b;
+  --danger: #ff4d6d;
+  color-scheme: dark;
+}
+
+/* Paper: a ledger on the table rather than a screen. The stamp red is deliberately NOT the
+   button colour - in a ledger red means money lost, and spending it on every control would
+   make a loss look like a button. */
+[data-theme='paper'] {
+  --bg: #f5f1e8;
+  --surface: #fffdf7;
+  --line: #ded5c4;
+  --text: #1f1a14;
+  --muted: #7a6e5d;
+  --primary: #1f1a14;
+  --on-primary: #f5f1e8;
+  --up: #2f6b4f;
+  --down: #b3261e;
+  --flat: #7a6e5d;
+  --danger: #b3261e;
   color-scheme: light;
 }
 
@@ -453,6 +488,67 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
 
 /* Historical rows: present for reference, not the thing being acted on. */
 .row-quiet { opacity: 0.72; }
+
+/* ---------- table tools ---------- */
+
+.clock-card { padding: 16px; }
+.clock-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+
+/* Read across a table, at night, by someone holding cards. Tabular figures so the last
+   minute does not jitter the layout once a second. */
+.clock-time {
+  margin: 4px 0 0;
+  font-size: 2.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.clock-time-low { color: var(--down); }
+.clock-sub { margin: 0; color: var(--muted); }
+.clock-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.clock-actions .btn { flex: 1 1 30%; margin-bottom: 0; }
+
+/* The button itself, on the seat that has it. */
+.dealer-badge {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* ---------- theme picker ---------- */
+
+/* One tap through the four looks. Pinned rather than in a top bar, because this app has no
+   top bar - the screens start with their own title and that is the whole chrome. */
+.theme-cycle {
+  position: fixed;
+  z-index: 5;
+  top: calc(12px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  margin: 0;
+  border-radius: 999px;
+  font-size: 1.1rem;
+  background: var(--surface);
+}
+
+/* The space the pinned button occupies, reserved so a long game name wraps instead of
+   running underneath it. */
+.title, .screen-head { padding-right: 52px; }
+.screen-head .title { padding-right: 0; }   /* the head already reserved it */
+
+.theme-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.theme-row .chip { flex: 0 0 auto; }
 
 /* ---------- avatar picker ---------- */
 

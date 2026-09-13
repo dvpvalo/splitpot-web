@@ -8,7 +8,15 @@ import {
   addEntry, deleteGame, finishGame, gameChanges, gameDetail, players,
   reopenGame, seatPlayer, setSettlementPaid, standingsOf,
 } from '../db.js'
+import {
+  advanced, blindsAtLevel, clockLabel, isPaused, newClock, nextLevel,
+  paused as pauseClock, remaining, resumed,
+} from '../lib/clock.js'
 import { formatMoney, settle } from '../lib/money.js'
+import {
+  clock as storedClock, clockEnabled, dealer as storedDealer, dealerEnabled, forgetGame,
+  levelMinutes, saveClock, setDealer,
+} from '../lib/tools.js'
 import { durationLabel, longDate, parseInstant, relativeLabel } from '../lib/time.js'
 import {
   button, clear, clearBanner, el, money, monogram, mount, sheet, showError, showNotice,
@@ -25,6 +33,11 @@ export function gameView(gameId) {
   // phone must not throw the host back to Players while they are reading the Timeline.
   const ui = { showing: 'players' }
 
+  // Built ONCE, outside load(), and re-mounted on every repaint. A card rebuilt per render
+  // would start a new one-second interval each time a buy-in arrived from the phone, and the
+  // old ones would keep ticking against detached nodes.
+  const clockCard = clockEnabled() ? blindClock(gameId) : null
+
   const load = async (quiet = false) => {
     if (!quiet) {
       clear(body)
@@ -33,9 +46,13 @@ export function gameView(gameId) {
     try {
       const detail = await gameDetail(gameId)
       clear(body)
+      // Off means ABSENT, not greyed out: a host who never switched the clock on pays no
+      // pixels for it. Same rule as the phone.
+      if (clockCard && detail.game.status === 'live') clockCard.update(detail)
       mount(body,
         header(detail),
         meter(detail),
+        clockCard && detail.game.status === 'live' ? clockCard : null,
         seatSection(detail, () => load(true), ui),
         settlementSection(detail, () => load(true)),
         actionsSection(detail, () => load(true)),
@@ -61,6 +78,7 @@ export function gameView(gameId) {
   // main.js calls this before swapping screens; without it every visit leaks a channel.
   root.destroy = () => {
     clearTimeout(timer)
+    clockCard?.stop()
     unsubscribe()
   }
 
@@ -123,7 +141,10 @@ function seatSection(detail, reload, ui) {
     clear(panel)
     if (ui.showing === 'players') {
       if (detail.seats.length === 0) panel.appendChild(el('p', 'muted', 'Nobody seated yet.'))
-      for (const s of detail.seats) panel.appendChild(seatRow(s, detail, reload))
+      const showDealer = dealerEnabled() && detail.game.status === 'live' && detail.seats.length > 0
+      if (showDealer) panel.appendChild(dealerRow(detail, draw))
+      const holder = showDealer ? storedDealer(detail.game.id) : null
+      for (const s of detail.seats) panel.appendChild(seatRow(s, detail, reload, holder))
     } else {
       timeline(detail).forEach((row) => panel.appendChild(row))
     }
@@ -134,7 +155,7 @@ function seatSection(detail, reload, ui) {
   return wrap
 }
 
-function seatRow(seat, detail, reload) {
+function seatRow(seat, detail, reload, dealerSeatId = null) {
   const { game } = detail
   const row = el('button', 'row row-tappable')
   row.type = 'button'
@@ -158,7 +179,125 @@ function seatRow(seat, detail, reload) {
 
   row.addEventListener('click', () => playerSheet(seat, detail, reload))
   mount(row, monogram(seat.player), main, right)
+  if (seat.gamePlayerId === dealerSeatId) {
+    row.insertBefore(el('span', 'dealer-badge', 'D'), right)
+  }
   return row
+}
+
+/**
+ * Who deals next. One button that moves round seat order, which is the whole feature - a
+ * dealer button is a physical disc being slid one seat to the left, and anything more than
+ * that is a screen nobody asked for.
+ *
+ * Local to this browser, like the clock: it means nothing to the ledger and nothing to the
+ * players, and it has to work with no signal. Redraws the seat list in place rather than
+ * refetching - passing the button once a hand is not worth a round trip.
+ */
+function dealerRow(detail, redraw) {
+  const gameId = detail.game.id
+  const seats = detail.seats
+  const current = seats.find((s) => s.gamePlayerId === storedDealer(gameId)) ?? null
+
+  const row = el('div', 'row')
+  const main = el('div', 'row-main')
+  mount(main,
+    el('h3', 'row-title', 'Dealer'),
+    el('p', 'row-sub', current ? current.player.name : 'Nobody has the button yet.'),
+  )
+
+  const pass = button(current ? 'Pass' : 'Set dealer', () => {
+    const at = seats.findIndex((s) => s.gamePlayerId === current?.gamePlayerId)
+    // -1 (nobody yet) lands on seat 0, which is what "Set dealer" should do.
+    setDealer(gameId, seats[(at + 1) % seats.length].gamePlayerId)
+    redraw()
+  }, 'btn-rebuy')
+
+  return mount(row, main, pass)
+}
+
+/**
+ * The blind clock: what level it is, what the blinds are, and how long is left.
+ *
+ * The countdown is DERIVED from a stored wall-clock time on every tick, never counted down
+ * in memory. Close the tab for two levels and it reopens two levels on, which is what
+ * happens at a table; a timer that resumed where it stopped would be quietly wrong all night.
+ *
+ * The node is returned with update() and stop() so the view can keep one of these alive
+ * across repaints instead of building a new interval every time a buy-in arrives.
+ */
+function blindClock(gameId) {
+  const wrap = el('section', 'card clock-card')
+  let state = storedClock(gameId)
+  let game = null
+
+  const head = el('div', 'clock-head')
+  const time = el('p', 'clock-time')
+  const sub = el('p', 'clock-sub')
+  const actions = el('div', 'clock-actions')
+  mount(head, el('h3', 'card-title', 'Blind clock'))
+  mount(wrap, head, time, sub, actions)
+
+  const levelMillis = () => levelMinutes() * 60_000
+
+  const set = (next) => {
+    state = next
+    saveClock(gameId, next)
+    draw()
+  }
+
+  const act = (label, run) => button(label, run, 'btn')
+
+  function draw() {
+    const millis = levelMillis()
+    const now = Date.now()
+
+    // Roll forward FIRST, so a tab reopened after two levels shows level three rather than
+    // counting the old level down from wherever it was.
+    if (state && !isPaused(state)) {
+      const rolled = advanced(state, millis, now)
+      if (rolled !== state) {
+        state = rolled
+        saveClock(gameId, rolled)
+      }
+    }
+
+    clear(actions)
+    if (!state) {
+      time.textContent = clockLabel(millis)
+      time.className = 'clock-time muted'
+      sub.textContent = `${millis / 60_000}-minute levels. Blinds double each one.`
+      actions.appendChild(act('Start the clock', () => set(newClock(Date.now()))))
+      return
+    }
+
+    const left = remaining(state, millis, now)
+    time.textContent = clockLabel(left)
+    // The last minute is the one anyone looks up for.
+    time.className = `clock-time${left <= 60_000 && !isPaused(state) ? ' clock-time-low' : ''}`
+
+    const blinds = game && blindsAtLevel(game.small_blind_cents, game.big_blind_cents, state.level)
+    sub.textContent = `Level ${state.level}`
+      + (blinds ? ` · ${formatMoney(blinds[0], game.currency)}/${formatMoney(blinds[1], game.currency)}` : '')
+      + (isPaused(state) ? ' · paused' : '')
+
+    mount(actions,
+      act(isPaused(state) ? 'Resume' : 'Pause', () => set(
+        isPaused(state) ? resumed(state, Date.now()) : pauseClock(state, levelMillis(), Date.now()),
+      )),
+      act('Next', () => set(nextLevel(state, Date.now()))),
+      act('Stop', () => set(null)),
+    )
+  }
+
+  // One tick a second. It only ever recomputes from the wall clock, so a missed tick - a
+  // backgrounded tab, a sleeping laptop - costs nothing but a stale reading until the next.
+  const ticking = setInterval(draw, 1000)
+
+  wrap.update = (detail) => { game = detail.game; draw() }
+  wrap.stop = () => clearInterval(ticking)
+  draw()
+  return wrap
 }
 
 /** One tap, one buy-in. Still awaited against the server before anything redraws. */
@@ -388,6 +527,9 @@ function actionsSection(detail, reload) {
     clearBanner()
     try {
       await deleteGame(game.id)
+      // The clock and the button live in THIS browser, so nothing else will ever prune them.
+      // The phone had the same leak and it was fixed there in passing.
+      forgetGame(game.id)
       location.hash = '#/history'
     } catch (e) {
       del.disabled = false

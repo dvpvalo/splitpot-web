@@ -53,6 +53,25 @@ export function remaining(c, levelMillis, now) {
 }
 
 /**
+ * Pausing stores how far INTO the level you were, because "when it started" stops meaning
+ * anything the moment the clock is not running. Clamped through remaining(), so pausing a
+ * level that has already overrun stores the level length rather than a number past it.
+ */
+export const paused = (c, levelMillis, now) => (
+  isPaused(c) ? c : { ...c, pausedElapsed: levelMillis - remaining(c, levelMillis, now) }
+)
+
+/** Resume where it stopped: shift the start back by however far in it was. */
+export const resumed = (c, now) => (
+  isPaused(c) ? { ...c, levelStartedAt: now - c.pausedElapsed, pausedElapsed: null } : c
+)
+
+/** The host calling it early. A level advanced by hand starts now and starts running. */
+export const nextLevel = (c, now) => (
+  { level: c.level + 1, levelStartedAt: now, pausedElapsed: null }
+)
+
+/**
  * The blinds at a given level: the game's own stakes, doubled each level. Derived rather
  * than configured - a level editor is a screen nobody wants to fill in before the first hand.
  * A game with no stakes recorded has nothing to double.

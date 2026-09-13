@@ -1,11 +1,15 @@
-// Settings: the host profile, the public standings switch, and the account.
-//
-// The table tools (blind clock, dealer button) and the theme picker arrive in Phase 8.
+// Settings: the host profile, the table tools, the look, the public standings switch, and
+// the account.
 
 import { signOut } from '../auth.js'
 import { deleteAccount, profile, saveProfile, setPublicHistory } from '../db.js'
+import { LEVEL_CHOICES } from '../lib/clock.js'
 import { formatAmount, parseMoney } from '../lib/money.js'
 import { historyMessage, historyUrl } from '../lib/share.js'
+import {
+  clockEnabled, dealerEnabled, levelMinutes, setClockEnabled, setDealerEnabled, setLevelMinutes,
+} from '../lib/tools.js'
+import { THEMES, apply as applyTheme, current as currentTheme } from '../theme.js'
 import { button, clear, clearBanner, el, mount, showError, showNotice } from '../ui.js'
 
 const CURRENCIES = ['GBP', 'INR', 'USD', 'EUR', 'AUD', 'CAD', 'JPY', 'ZAR']
@@ -22,7 +26,13 @@ export function settingsView() {
     try {
       const me = await profile()
       clear(body)
-      mount(body, profileCard(me ?? {}), standingsCard(me ?? {}), accountCard())
+      mount(body,
+        profileCard(me ?? {}),
+        toolsCard(),
+        lookCard(),
+        standingsCard(me ?? {}),
+        accountCard(),
+      )
     } catch (e) {
       clear(body)
       showError(`Could not load your settings: ${e.message ?? e}`, load)
@@ -112,6 +122,102 @@ function profileCard(me) {
   })
 
   return form
+}
+
+// ---------- table tools ----------
+
+/**
+ * The two things that can sit on the live table. Both start OFF, and off means ABSENT - the
+ * table renders exactly as it did before them, with no greyed-out control and no placeholder
+ * row. A feature nobody switched on costs them no pixels.
+ *
+ * Local to this browser, never in Postgres: a clock is about the room you are sitting in, it
+ * has to keep counting with no signal, and syncing a timer across devices would be a hard
+ * problem bought for nobody.
+ */
+function toolsCard() {
+  const wrap = el('div', 'stack')
+  const levels = el('div', 'chips')
+
+  const drawLevels = () => {
+    clear(levels)
+    for (const n of LEVEL_CHOICES) {
+      const on = n === levelMinutes()
+      const chip = button(`${n} min`, () => { setLevelMinutes(n); drawLevels() },
+        `chip${on ? ' chip-on' : ''}`)
+      chip.setAttribute('aria-pressed', String(on))
+      levels.appendChild(chip)
+    }
+  }
+  drawLevels()
+
+  const levelWrap = el('div', 'stack-tight')
+  mount(levelWrap, el('p', 'muted small', 'Minutes per level'), levels)
+  levelWrap.hidden = !clockEnabled()
+
+  return mount(wrap,
+    el('h2', 'section-label', 'Table tools'),
+    el('p', 'muted small', 'Both off by default. Off means they are not on the table at all.'),
+    toggle('Blind clock', 'Counts down the level and doubles the blinds from this game\u2019s '
+      + 'own stakes.', clockEnabled, (on) => {
+      setClockEnabled(on)
+      levelWrap.hidden = !on
+    }),
+    levelWrap,
+    toggle('Dealer button', 'Shows who deals next, and moves round the table with one tap.',
+      dealerEnabled, setDealerEnabled),
+  )
+}
+
+/**
+ * A switch, as a button that says what one tap will do.
+ *
+ * A real <input type=checkbox> would be the native answer, but every other control on this
+ * screen is a full-width button and a 20px box beside a label is the one target on the page
+ * that fails the 44px rule this app is built around.
+ */
+function toggle(title, blurb, read, write) {
+  const wrap = el('div', 'stack-tight')
+  let on = read()
+  const btn = button('', () => { on = !on; write(on); draw() }, 'btn')
+
+  function draw() {
+    btn.textContent = `${title}: ${on ? 'on' : 'off'}`
+    btn.className = `btn${on ? ' btn-on' : ''}`
+    btn.setAttribute('aria-pressed', String(on))
+  }
+  draw()
+
+  return mount(wrap, btn, el('p', 'muted small', blurb))
+}
+
+// ---------- the look ----------
+
+function lookCard() {
+  const wrap = el('div', 'stack')
+  const row = el('div', 'theme-row')
+
+  const draw = () => {
+    clear(row)
+    for (const t of THEMES) {
+      const on = t.key === currentTheme()
+      const chip = button(t.label, () => { applyTheme(t.key); draw() },
+        `chip${on ? ' chip-on' : ''}`)
+      chip.setAttribute('aria-pressed', String(on))
+      row.appendChild(chip)
+    }
+  }
+  draw()
+  // The view is torn down with the screen, so this listener goes with it - but the screen can
+  // outlive several theme changes, and the chips have to keep up with the pinned button.
+  window.addEventListener('splitpot:theme', draw)
+
+  return mount(wrap,
+    el('h2', 'section-label', 'Look'),
+    el('p', 'muted small',
+      'System follows your device. The button at the top of the screen cycles the other four.'),
+    row,
+  )
 }
 
 // ---------- public standings ----------

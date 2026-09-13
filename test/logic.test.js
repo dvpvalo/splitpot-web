@@ -7,8 +7,9 @@ import {
 } from '../public/lib/money.js'
 import { recordsFor, seasonsIn, standingsFor, streakLabel } from '../public/lib/stats.js'
 import {
-  advanced, blindsAtLevel, clockLabel, isPaused,
-  parse as parseClock, remaining, serialise as serialiseClock,
+  advanced, blindsAtLevel, clockLabel, isPaused, nextLevel,
+  parse as parseClock, paused as pauseClock, remaining, resumed,
+  serialise as serialiseClock,
 } from '../public/lib/clock.js'
 import { MAX, parsePresets, remove, upsert } from '../public/lib/presets.js'
 import {
@@ -335,6 +336,41 @@ test('pausing stops the clock no matter how long you leave it', () => {
   // An hour later it still has the same time left, and has not changed level.
   assert.equal(remaining(paused, LEVEL, START + 60 * 60 * 1000), 17 * 60 * 1000)
   assert.deepEqual(advanced(paused, LEVEL, START + 60 * 60 * 1000), paused)
+})
+
+test('pause then resume an hour later keeps the same time left', () => {
+  const c = { level: 2, levelStartedAt: START, pausedElapsed: null }
+  const at = START + 3 * 60 * 1000
+  const stopped = pauseClock(c, LEVEL, at)
+  assert.ok(isPaused(stopped))
+  assert.equal(remaining(stopped, LEVEL, at), 17 * 60 * 1000)
+
+  // The whole point: real time passing while paused must buy nothing and cost nothing.
+  const later = at + 60 * 60 * 1000
+  const running = resumed(stopped, later)
+  assert.equal(isPaused(running), false)
+  assert.equal(remaining(running, LEVEL, later), 17 * 60 * 1000)
+  assert.equal(running.level, 2)
+})
+
+test('pausing a level that already overran stores the level, not more', () => {
+  const c = { level: 1, levelStartedAt: START, pausedElapsed: null }
+  const stopped = pauseClock(c, LEVEL, START + 10 * LEVEL)
+  assert.equal(stopped.pausedElapsed, LEVEL)
+  assert.equal(remaining(stopped, LEVEL, START + 99 * LEVEL), 0)
+})
+
+test('pausing an already paused clock changes nothing', () => {
+  const stopped = { level: 2, levelStartedAt: START, pausedElapsed: 1000 }
+  assert.deepEqual(pauseClock(stopped, LEVEL, START + 999_999), stopped)
+})
+
+test('next level by hand starts a full level, running, from now', () => {
+  const stopped = { level: 2, levelStartedAt: START, pausedElapsed: 1000 }
+  const next = nextLevel(stopped, START + 5000)
+  assert.equal(next.level, 3)
+  assert.equal(isPaused(next), false)
+  assert.equal(remaining(next, LEVEL, START + 5000), LEVEL)
 })
 
 test('remaining never goes negative', () => {

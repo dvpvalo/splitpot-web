@@ -25,7 +25,9 @@ import { ledgerMessage, ledgerUrl } from '../lib/share.js'
 import { playerSheet } from './playersheet.js'
 
 export function gameView(gameId) {
-  const root = el('main', 'screen')
+  // screen-wide: this is the one screen that becomes two columns, so it is the one screen
+  // allowed to use more than the reading-width column.
+  const root = el('main', 'screen screen-wide')
   const body = el('div', 'stack')
   root.appendChild(body)
 

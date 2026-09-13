@@ -545,6 +545,54 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   .panel-label { display: block; margin-bottom: 8px; }
 }
 
+/* ---------- how much page each device gets ---------- */
+
+/* Phone: full width, one column, tabs under the thumb. That is the default above; every
+   rule here only adds room as a bigger screen earns it. */
+
+/* Tablet portrait. The column grows by a margin rather than to fit: a seat row stretched
+   across an iPad - name at one end, number at the other - is the thing the cap exists to
+   prevent, and it is no more readable at 768px than at 1200. */
+@media (min-width: 600px) {
+  #app { max-width: 620px; padding-left: 24px; padding-right: 24px; }
+  .sheet-body { padding-left: 24px; padding-right: 24px; }
+}
+
+/* Tablet landscape and desktop. Only screens that actually became two columns get the extra
+   width - everything else would just be a long line to read. */
+@media (min-width: 900px) {
+  #app { position: relative; }
+  #app:has(.screen-wide) { max-width: 1040px; }
+
+  /* A sheet slid up from the bottom edge is a phone gesture. With a mouse it is a dialog. */
+  .sheet { margin: auto; border-radius: 16px; max-height: 80dvh; }
+
+  /* Pinned to the column, not the window, or on a wide desktop it strands itself in the
+     corner miles from anything it affects. */
+  .theme-cycle { position: absolute; top: 16px; right: 16px; }
+}
+
+/* Two columns where a screen has two genuinely separate lists. Below this they stack, which
+   is what .stack already does - so the phone needs no rule at all. */
+@media (min-width: 900px) {
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+}
+
+/* A mouse can hover and a finger cannot, so this is the one place the two really differ.
+   Guarded on pointer:fine as well, because some touch browsers report hover:hover and then
+   leave the hovered state stuck after a tap. */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled), .chip:hover, .key:hover, .row-tappable:hover {
+    border-color: var(--primary);
+  }
+  .btn-link:hover { color: var(--text); }
+}
+
 /* ---------- theme picker ---------- */
 
 /* One tap through the four looks. Pinned rather than in a top bar, because this app has no

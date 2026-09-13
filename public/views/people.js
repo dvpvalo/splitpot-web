@@ -31,9 +31,11 @@ const PAYMENT_TYPES = [
 const typeLabel = (wire) => PAYMENT_TYPES.find(([w]) => w === wire)?.[1] ?? 'None'
 
 export function peopleView() {
-  const root = el('main', 'screen')
+  const root = el('main', 'screen screen-wide')
   root.appendChild(el('h1', 'title', 'People'))
-  const body = el('div', 'stack')
+  // Two lists that answer different questions - how everyone is doing, and who is in the
+  // book. They sit side by side once there is room and stack when there is not.
+  const body = el('div', 'stack split')
   root.appendChild(body)
 
   const load = async () => {

@@ -567,9 +567,6 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   /* A sheet slid up from the bottom edge is a phone gesture. With a mouse it is a dialog. */
   .sheet { margin: auto; border-radius: 16px; max-height: 80dvh; }
 
-  /* Pinned to the column, not the window, or on a wide desktop it strands itself in the
-     corner miles from anything it affects. */
-  .theme-cycle { position: absolute; top: 16px; right: 16px; }
 }
 
 /* Two columns where a screen has two genuinely separate lists. Below this they stack, which
@@ -628,3 +625,9 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
 
 /* Square-ish, so twenty of them scroll past in a couple of swipes. */
 .chip-face { min-width: 44px; padding: 0 8px; font-size: 1.25rem; }
+
+/* Pinned to the column rather than the window once the window is wider than the column -
+   otherwise on a desktop it strands itself in a corner miles from anything it affects. */
+@media (min-width: 900px) {
+  .theme-cycle { position: absolute; top: 16px; right: 16px; }
+}

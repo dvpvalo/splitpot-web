@@ -1,0 +1,9 @@
+{
+  // Only ./public is served. The repo root is NOT the asset root: pointing Workers
+  // at "." uploaded the entire .git directory as public files on the first deploy
+  // (13 Sep 2026), which is how a private tree would leak. Whitelist, never blacklist.
+  "name": "splitpot",
+  "compatibility_date": "2026-09-11",
+  "observability": { "enabled": true },
+  "assets": { "directory": "./public" }
+}

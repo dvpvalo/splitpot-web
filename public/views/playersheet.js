@@ -5,11 +5,15 @@
 
 import { addEntry, deleteEntry, unseatPlayer } from '../db.js'
 import { formatAmount, formatMoney, minorUnitDigits, parseMoney } from '../lib/money.js'
+import { pileLabel } from '../lib/table.js'
 import { parseInstant, relativeLabel } from '../lib/time.js'
-import { button, clear, clearBanner, el, money, mount, sheet, showError } from '../ui.js'
+import { button, clear, clearBanner, el, money, monogram, mount, sheet, showError } from '../ui.js'
 
-/** Quick-add chips, in the game's own currency. */
+/** The chip denominations in the tray, in the game's own currency. */
 const QUICK_AMOUNTS = [20, 50, 100, 200]
+
+/** Chips drawn on the cloth before the pile just says "and more". */
+const PILE_MAX = 7
 
 export function playerSheet(seat, detail, onSaved) {
   const { game } = detail
@@ -19,36 +23,55 @@ export function playerSheet(seat, detail, onSaved) {
   const live = game.status === 'live'
 
   let mode = 'buyin'
+  // `typed` is always the whole amount, however it got there, so the keypad's backspace edits
+  // exactly what is on screen. `pile` is only the chips tapped on top of `base` since the last
+  // time the amount was set some other way - it exists to draw the stack and label it.
   let typed = ''
+  let base = 0
+  let pile = []
+  let keypadOpen = false
 
-  const body = el('div', 'sheet-body')
+  const body = el('div', 'sheet-body keypad-closed')
   const amountLine = el('p', 'amount-display')
-  const chips = el('div', 'chips')
+  const pileLine = el('p', 'pile-label')
+  const stack = el('div', 'pile')
+  const clearBtn = button('Clear', () => setAmount(''), 'btn-link')
+  const cloth = el('div', 'cloth')
+  const clothText = el('div', 'cloth-amount')
+  mount(clothText, amountLine, pileLine)
+  mount(cloth, stack, clothText, clearBtn)
+  const chips = el('div', 'chips tray')
   const pad = el('div', 'keypad')
+  const padToggle = button('', () => { keypadOpen = !keypadOpen; draw() }, 'btn-link keypad-toggle')
   const modes = el('div', 'pills')
   const submit = button('', () => save(), 'btn btn-primary')
   const note = el('p', 'muted small')
 
   const cents = () => parseMoney(typed, currency)
+  const setAmount = (value) => {
+    typed = value
+    base = cents() ?? 0
+    pile = []
+    draw()
+  }
 
-  const quickChips = () => {
+  // Chips that SET the amount - the ones that mean a specific number for this player.
+  const presets = () => {
     const repeat = seat.lastBuyInCents
-    const defaults = QUICK_AMOUNTS.map((n) => [formatMoney(n * scale, currency), n * scale])
     if (mode === 'cashout') {
       // Cash-outs are usually "everything in front of them", so offer that first.
       const offered = []
       if (seat.buyInCents > 0) offered.push(['Their buy-in', seat.buyInCents])
-      if (repeat) offered.push(['Last buy-in', repeat])
-      return offered.length ? offered : defaults
+      if (repeat && repeat !== seat.buyInCents) offered.push(['Last buy-in', repeat])
+      return offered
     }
-    if (!repeat) return defaults
-    return [['Again', repeat], ...defaults.slice(0, 3)]
+    return repeat ? [['Again', repeat]] : []
   }
 
   const draw = () => {
     clear(modes)
     for (const [key, label] of [['buyin', 'Buy-in'], ['cashout', 'Cash-out']]) {
-      const b = button(label, () => { mode = key; typed = ''; draw() },
+      const b = button(label, () => { mode = key; setAmount('') },
         `chip${mode === key ? ' chip-on' : ''}`)
       b.setAttribute('aria-pressed', String(mode === key))
       b.disabled = !live
@@ -58,14 +81,49 @@ export function playerSheet(seat, detail, onSaved) {
     amountLine.textContent = typed === ''
       ? formatMoney(0, currency)
       : formatMoney(cents() ?? 0, currency)
+    const chipsText = pileLabel(pile, (v) => formatMoney(v, currency))
+    pileLine.textContent = pile.length === 0
+      ? ''
+      : base > 0 ? `${formatMoney(base, currency)} + ${chipsText}` : chipsText
+    clearBtn.hidden = typed === ''
+
+    clear(stack)
+    const shown = pile.length ? pile.slice(-PILE_MAX) : (cents() ? [0, 0] : [])
+    shown.forEach((v, i) => {
+      const disc = el('i', `disc disc-d${QUICK_AMOUNTS.findIndex((n) => n * scale === v)}`)
+      disc.style.setProperty('--i', String(i))
+      stack.appendChild(disc)
+    })
+    stack.style.setProperty('--n', String(shown.length))
 
     clear(chips)
-    for (const [label, value] of quickChips()) {
-      const chip = button(label, () => { typed = formatAmount(value, currency); draw() },
-        `chip${cents() === value ? ' chip-on' : ''}`)
+    for (const [label, value] of presets()) {
+      const on = pile.length === 0 && cents() === value
+      const chip = button(`${label} ${formatMoney(value, currency)}`, () => setAmount(formatAmount(value, currency)),
+        `chip chip-set${on ? ' chip-on' : ''}`)
+      chip.setAttribute('aria-pressed', String(on))
       chip.disabled = !live
       chips.appendChild(chip)
     }
+    // Denominations ADD, the way chips go onto a pile: ₹100 twice is ₹200. A fast double-tap
+    // must add twice, which is why these never disable themselves between taps.
+    QUICK_AMOUNTS.forEach((n, i) => {
+      const value = n * scale
+      const chip = button(formatMoney(value, currency), () => {
+        const total = (cents() ?? 0) + value
+        if (pile.length === 0) base = cents() ?? 0
+        pile = [...pile, value]
+        typed = formatAmount(total, currency)
+        draw()
+      }, `chip chip-denom chip-d${i}`)
+      chip.setAttribute('aria-label', `Add ${formatMoney(value, currency)}`)
+      chip.disabled = !live
+      chips.appendChild(chip)
+    })
+
+    body.classList.toggle('keypad-closed', !keypadOpen)
+    padToggle.textContent = keypadOpen ? 'Hide the keypad' : 'Type an exact amount'
+    padToggle.disabled = !live
 
     const amount = cents()
     submit.textContent = (mode === 'buyin' ? 'Add buy-in ' : 'Record cash-out ')
@@ -90,6 +148,7 @@ export function playerSheet(seat, detail, onSaved) {
       })
       // Only now is it real. Nothing above rendered it as saved.
       typed = ''
+      pile = []
       dlg.close()
       await onSaved()
     } catch (e) {
@@ -104,22 +163,30 @@ export function playerSheet(seat, detail, onSaved) {
   }
 
   buildKeypad(pad, digits > 0, (key) => {
-    if (key === 'back') typed = typed.slice(0, -1)
-    else if (key === '.') { if (!typed.includes('.')) typed = (typed || '0') + '.' }
-    else typed += key
+    let next = typed
+    if (key === 'back') next = typed.slice(0, -1)
+    else if (key === '.') { if (!typed.includes('.')) next = (typed || '0') + '.' }
+    else next = typed + key
+    // Typing takes over from the chips: the pile no longer describes the amount.
+    typed = next
+    base = 0
+    pile = []
     draw()
   })
 
   mount(body,
     el('p', 'sheet-sub', `Buy-in ${formatMoney(seat.buyInCents, currency)}`
-      + (seat.hasCashedOut ? ` · Cash-out ${formatMoney(seat.cashOutCents, currency)}` : '')),
-    modes, amountLine, chips, pad, submit, note,
+      + (seat.hasCashedOut ? ` · Cash-out ${formatMoney(seat.cashOutCents, currency)}` : '')
+      + ` · ${formatMoney(seat.netCents, currency, true)}`),
+    modes, cloth, chips, padToggle, pad, submit, note,
     history(seat, detail, onSaved, () => dlg.close()),
     removeSeat(seat, detail, onSaved, () => dlg.close()),
   )
 
   draw()
   const dlg = sheet(seat.player.name, body)
+  // The same chip that sits at their seat, so the sheet is visibly the player you tapped.
+  dlg.querySelector('.sheet-head')?.prepend(monogram(seat.player, 'monogram'))
   return dlg
 }
 

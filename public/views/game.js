@@ -22,6 +22,7 @@ import {
   button, clear, clearBanner, el, money, monogram, mount, sheet, showError, showNotice,
 } from '../ui.js'
 import { ledgerMessage, ledgerUrl } from '../lib/share.js'
+import { SEAT_H, SEAT_W, tableLayout } from '../lib/table.js'
 import { playerSheet } from './playersheet.js'
 
 export function gameView(gameId) {
@@ -53,7 +54,6 @@ export function gameView(gameId) {
       if (clockCard && detail.game.status === 'live') clockCard.update(detail)
       mount(body,
         header(detail),
-        meter(detail),
         clockCard && detail.game.status === 'live' ? clockCard : null,
         seatSection(detail, () => load(true), ui),
         settlementSection(detail, () => load(true)),
@@ -105,7 +105,16 @@ function header({ game }) {
  */
 function meter(detail) {
   const { game, buyInCents, cashOutCents, seats } = detail
-  const wrap = el('div', 'stack-tight')
+  const wrap = el('div', 'pot')
+  const live = game.status === 'live'
+
+  // What sits in the middle of the cloth: the money still out there while the game runs, the
+  // whole pot once it is settled (in play is zero by then, which says nothing).
+  mount(wrap,
+    el('span', 'pot-stack'),
+    el('p', 'pot-label', live ? 'In play' : 'Pot'),
+    el('p', 'pot-amount', formatMoney(live ? detail.inPlayCents : buyInCents, game.currency)),
+  )
 
   const fraction = buyInCents > 0 ? Math.min(Math.max(cashOutCents / buyInCents, 0), 1) : 0
   const track = el('div', 'meter')
@@ -122,56 +131,56 @@ function meter(detail) {
   const duration = durationLabel(
     parseInstant(game.started_at), parseInstant(game.finished_at), new Date(),
   )
-  mount(wrap, track, el('p', 'row-sub',
+  mount(wrap, track, el('p', 'pot-sub',
     `in ${formatMoney(buyInCents, game.currency)}`
-    + ` · out ${formatMoney(cashOutCents, game.currency)}`
-    + ` · ${seats.length} ${seatWord} · ${duration}`))
+    + ` · out ${formatMoney(cashOutCents, game.currency)}`),
+  el('p', 'pot-sub', `${seats.length} ${seatWord} · ${duration}`))
   return wrap
 }
 
 /**
- * Seats and timeline. One at a time on a phone, both at once from ~900px up.
+ * The table and the timeline. One at a time on a phone, both at once from ~900px up.
  *
- * BOTH panels are always built and CSS decides which are shown - no JS breakpoint, no resize
- * listener, and rotating a tablet needs no re-render. A landscape tablet is the one layout
- * where the timeline genuinely earns its own column; on a phone it would halve two lists that
- * are already narrow.
+ * BOTH panels are always built and CSS decides which are shown - no JS breakpoint, and
+ * rotating a tablet needs no re-render. A landscape tablet is the one layout where the
+ * timeline genuinely earns its own column.
  */
 function seatSection(detail, reload, ui) {
   const wrap = el('div', 'stack-tight seats')
   const tabs = el('div', 'pills')
   const panels = el('div', 'panels')
 
-  const column = (label) => {
+  const column = (label, cls) => {
     const col = el('div', 'panel')
     col.appendChild(el('h3', 'section-label panel-label', label))
-    const list = el('div', 'list')
-    col.appendChild(list)
-    return [col, list]
+    const inner = el('div', cls)
+    col.appendChild(inner)
+    return [col, inner]
   }
-  const [playersCol, playersList] = column('Players')
-  const [timelineCol, timelineList] = column('Timeline')
-  mount(panels, playersCol, timelineCol)
+  const [tableCol, tableWrap] = column('Table', 'table-wrap')
+  const [timelineCol, timelineList] = column('Timeline', 'list')
+  mount(panels, tableCol, timelineCol)
 
   const draw = () => {
     clear(tabs)
-    for (const [key, label] of [['players', 'Players'], ['timeline', 'Timeline']]) {
+    for (const [key, label] of [['players', 'Table'], ['timeline', 'Timeline']]) {
       const b = button(label, () => { ui.showing = key; draw() }, `chip${ui.showing === key ? ' chip-on' : ''}`)
       b.setAttribute('aria-pressed', String(ui.showing === key))
       tabs.appendChild(b)
     }
 
-    clear(playersList)
-    if (detail.seats.length === 0) playersList.appendChild(el('p', 'muted', 'Nobody seated yet.'))
+    clear(tableWrap)
     const showDealer = dealerEnabled() && detail.game.status === 'live' && detail.seats.length > 0
-    if (showDealer) playersList.appendChild(dealerRow(detail, draw))
     const holder = showDealer ? storedDealer(detail.game.id) : null
-    for (const s of detail.seats) playersList.appendChild(seatRow(s, detail, reload, holder))
+    tableWrap.appendChild(ovalTable(detail, reload, holder))
+    if (showDealer) tableWrap.appendChild(dealerRow(detail, draw))
 
     clear(timelineList)
-    timeline(detail).forEach((row) => timelineList.appendChild(row))
+    const rows = timeline(detail)
+    if (rows.length === 0) timelineList.appendChild(el('p', 'muted', 'Nothing logged yet.'))
+    rows.forEach((row) => timelineList.appendChild(row))
 
-    playersCol.className = `panel${ui.showing === 'players' ? '' : ' panel-off'}`
+    tableCol.className = `panel${ui.showing === 'players' ? '' : ' panel-off'}`
     timelineCol.className = `panel${ui.showing === 'timeline' ? '' : ' panel-off'}`
   }
 
@@ -180,34 +189,91 @@ function seatSection(detail, reload, ui) {
   return wrap
 }
 
-function seatRow(seat, detail, reload, dealerSeatId = null) {
-  const { game } = detail
-  const row = el('button', 'row row-tappable')
-  row.type = 'button'
-  const main = el('div', 'row-main')
-  const nameLine = el('h3', 'row-title', seat.player.name + (seat.player.is_self ? ' (You)' : ''))
-  let sub = `Buy-in ${formatMoney(seat.buyInCents, game.currency)}`
-  if (seat.hasCashedOut) sub += ` · Cash-out ${formatMoney(seat.cashOutCents, game.currency)}`
-  mount(main, nameLine, el('p', 'row-sub', sub))
+/**
+ * The seats round an oval of felt, the pot in the middle, an open seat to sit someone new.
+ *
+ * Positions come from tableLayout() and are re-applied whenever the table's width changes, so
+ * the same nodes serve a phone, a rotated tablet and a desktop column. Nothing is re-rendered
+ * on resize: the seats are moved, not rebuilt, so a half-finished tap never loses its target.
+ */
+function ovalTable(detail, reload, dealerSeatId) {
+  const live = detail.game.status === 'live'
+  const table = el('div', 'table')
+  const felt = el('div', 'felt')
+  const pot = meter(detail)
+  mount(table, felt, pot)
 
-  const right = el('div', 'row-right')
-  right.appendChild(money(seat.netCents, game.currency, true))
+  const places = detail.seats.map((s) => seatNode(s, detail, reload, s.gamePlayerId === dealerSeatId))
+  if (live) {
+    const add = el('button', 'seat seat-add')
+    add.type = 'button'
+    mount(add, el('span', 'seat-empty', '+'), el('span', 'seat-name', 'Add player'))
+    add.addEventListener('click', () => seatSheet(detail, reload))
+    places.push(add)
+  }
+  places.forEach((p) => table.appendChild(p))
+
+  const layout = (width) => {
+    const { height, a, b, seats } = tableLayout(places.length, width)
+    table.style.height = `${height}px`
+    Object.assign(felt.style, {
+      left: `${width / 2 - a}px`, top: `${height / 2 - b}px`, width: `${2 * a}px`, height: `${2 * b}px`,
+    })
+    // The pot gets the widest band that no seat reaches into, so it can never sit under one.
+    const potHalfH = 72
+    let half = 130
+    const hits = (w) => seats.some((s) => Math.abs(s.x - width / 2) - SEAT_W / 2 < w
+      && Math.abs(s.y - height / 2) - SEAT_H / 2 < potHalfH)
+    while (half > 50 && hits(half)) half -= 4
+    pot.style.setProperty('--pot-w', `${2 * half}px`)
+    seats.forEach((pos, i) => {
+      places[i].style.left = `${pos.x - SEAT_W / 2}px`
+      places[i].style.top = `${pos.y - SEAT_H / 2}px`
+    })
+  }
+  // A phone-width guess so the first paint is already a table; the observer corrects it before
+  // the frame is drawn.
+  layout(358)
+  const observer = new ResizeObserver(([entry]) => {
+    // Every repaint builds a new table, so an observer on a detached one lets go of itself.
+    if (!table.isConnected) { observer.disconnect(); return }
+    const width = entry.contentRect.width
+    if (width > 0) layout(width)
+  })
+  observer.observe(table)
+  return table
+}
+
+function seatNode(seat, detail, reload, isDealer) {
+  const { game } = detail
+  const node = el('div', `seat${seat.hasCashedOut ? ' seat-out' : ''}`)
+
+  // The chip and the name plate open the sheet. The rebuy is a SEPARATE button beside them,
+  // never nested inside: a button in a button is invalid, and the parser hoists it out.
+  const open = el('button', 'seat-open')
+  open.type = 'button'
+  open.setAttribute('aria-label', `${seat.player.name}, ${formatMoney(seat.netCents, game.currency, true)}`)
+  const plate = el('span', 'seat-plate')
+  mount(plate,
+    el('span', 'seat-name', seat.player.name + (seat.player.is_self ? ' (You)' : '')),
+    money(seat.netCents, game.currency, true),
+  )
+  mount(open, monogram(seat.player, 'monogram'), plate)
+  open.addEventListener('click', () => playerSheet(seat, detail, reload))
+  node.appendChild(open)
+  if (isDealer) node.appendChild(el('span', 'dealer-badge', 'D'))
 
   // Only once they have bought in and not yet cashed out: a "rebuy" needs a previous amount
   // to repeat, and reopening a cashed-out player is a decision that deserves the full sheet.
   const repeat = seat.lastBuyInCents
   if (game.status === 'live' && repeat && !seat.hasCashedOut) {
     const again = button(`+ ${formatMoney(repeat, game.currency)}`,
-      (ev) => { ev.stopPropagation(); rebuy(again, seat, detail, repeat, reload) }, 'btn-rebuy')
-    right.appendChild(again)
+      () => rebuy(again, seat, detail, repeat, reload), 'btn-rebuy')
+    node.appendChild(again)
+  } else if (game.status === 'live' && seat.hasCashedOut) {
+    node.appendChild(el('span', 'seat-note', 'Cashed out'))
   }
-
-  row.addEventListener('click', () => playerSheet(seat, detail, reload))
-  mount(row, monogram(seat.player), main, right)
-  if (seat.gamePlayerId === dealerSeatId) {
-    row.insertBefore(el('span', 'dealer-badge', 'D'), right)
-  }
-  return row
+  return node
 }
 
 /**
@@ -224,7 +290,7 @@ function dealerRow(detail, redraw) {
   const seats = detail.seats
   const current = seats.find((s) => s.gamePlayerId === storedDealer(gameId)) ?? null
 
-  const row = el('div', 'row')
+  const row = el('div', 'row dealer-bar')
   const main = el('div', 'row-main')
   mount(main,
     el('h3', 'row-title', 'Dealer'),
@@ -502,8 +568,7 @@ function actionsSection(detail, reload) {
   const paidCount = detail.settlements.filter((s) => s.status === 'paid').length
 
   if (game.status === 'live') {
-    wrap.appendChild(button('Add a player', () => seatSheet(detail, reload), 'btn'))
-
+    // No "Add a player" button here: the open seat on the table is that button.
     const finish = button('Finish & settle', async () => {
       // Finishing REPLACES the stored settlement, so a second finish destroys paid ticks.
       // Never do that without saying how many.

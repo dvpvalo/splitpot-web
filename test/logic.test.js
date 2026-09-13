@@ -501,3 +501,38 @@ test('the results message is the one people paste into WhatsApp', () => {
   assert.ok(resultsMessage(game, []).includes("Everyone's square. Nothing to settle."))
   assert.equal(historyUrl('slug9'), 'https://dvpvalo.github.io/splitpot-ledger/history.html?h=slug9')
 })
+
+// ---------- the oval table ----------
+import { SEAT_H, SEAT_W, pileLabel, tableLayout } from '../public/lib/table.js'
+
+test('seats never overlap, from an empty table to a full one, phone to desktop', () => {
+  for (const width of [343, 358, 560, 640]) {
+    for (let count = 1; count <= 11; count++) {
+      const { seats, height } = tableLayout(count, width)
+      assert.equal(seats.length, count)
+      for (const s of seats) {
+        assert.ok(s.x - SEAT_W / 2 >= -0.5 && s.x + SEAT_W / 2 <= width + 0.5, `seat off the side at ${width}/${count}`)
+        assert.ok(s.y - SEAT_H / 2 >= -0.5 && s.y + SEAT_H / 2 <= height + 0.5, `seat off the end at ${width}/${count}`)
+      }
+      for (let i = 0; i < seats.length; i++) {
+        for (let j = i + 1; j < seats.length; j++) {
+          const apart = Math.abs(seats[i].x - seats[j].x) >= SEAT_W - 0.5
+            || Math.abs(seats[i].y - seats[j].y) >= SEAT_H - 0.5
+          assert.ok(apart, `seats ${i} and ${j} collide at ${width}px with ${count}`)
+        }
+      }
+    }
+  }
+})
+
+test('the first seat is at the head of the table', () => {
+  const { seats, width } = tableLayout(6, 358)
+  assert.ok(Math.abs(seats[0].x - width / 2) < 1)
+  assert.ok(seats.every((s) => s.y >= seats[0].y))
+})
+
+test('pile label groups chips, biggest first', () => {
+  const f = (v) => `₹${v / 100}`
+  assert.equal(pileLabel([10000, 5000, 10000], f), '2 × ₹100 + ₹50')
+  assert.equal(pileLabel([], f), '')
+})

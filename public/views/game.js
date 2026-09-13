@@ -5,7 +5,7 @@
 // banner naming the player and the amount, with Retry; it never fails quietly.
 
 import {
-  addEntry, deleteGame, finishGame, gameChanges, gameDetail, players,
+  addEntry, deleteEntry, deleteGame, finishGame, gameChanges, gameDetail, players,
   reopenGame, seatPlayer, setSettlementPaid, standingsOf,
 } from '../db.js'
 import {
@@ -19,10 +19,10 @@ import {
 } from '../lib/tools.js'
 import { durationLabel, longDate, parseInstant, relativeLabel } from '../lib/time.js'
 import {
-  button, clear, clearBanner, el, money, monogram, mount, sheet, showError, showNotice,
+  button, clear, clearBanner, el, money, monogram, mount, sheet, showError, showNotice, showUndo,
 } from '../ui.js'
 import { ledgerMessage, ledgerUrl } from '../lib/share.js'
-import { SEAT_H, SEAT_W, tableLayout } from '../lib/table.js'
+import { SEAT_H, SEAT_W, rackEdges, seatName, tableLayout } from '../lib/table.js'
 import { playerSheet } from './playersheet.js'
 
 export function gameView(gameId) {
@@ -116,9 +116,10 @@ function meter(detail) {
     el('p', 'pot-amount', formatMoney(live ? detail.inPlayCents : buyInCents, game.currency)),
   )
 
+  // The bank's rack: green for what has gone back out, silver for what is still on the table.
   const fraction = buyInCents > 0 ? Math.min(Math.max(cashOutCents / buyInCents, 0), 1) : 0
-  const track = el('div', 'meter')
-  const fill = el('div', `meter-fill${fraction >= 1 ? ' meter-done' : ''}`)
+  const track = el('div', 'meter bank-bar')
+  const fill = el('div', 'meter-fill')
   fill.style.width = `${fraction * 100}%`
   track.appendChild(fill)
   track.setAttribute('role', 'progressbar')
@@ -203,7 +204,8 @@ function ovalTable(detail, reload, dealerSeatId) {
   const pot = meter(detail)
   mount(table, felt, pot)
 
-  const places = detail.seats.map((s) => seatNode(s, detail, reload, s.gamePlayerId === dealerSeatId))
+  const racks = rackEdges(detail.seats)
+  const places = detail.seats.map((s, i) => seatNode(s, detail, reload, s.gamePlayerId === dealerSeatId, racks[i]))
   if (live) {
     const add = el('button', 'seat seat-add')
     add.type = 'button'
@@ -244,7 +246,7 @@ function ovalTable(detail, reload, dealerSeatId) {
   return table
 }
 
-function seatNode(seat, detail, reload, isDealer) {
+function seatNode(seat, detail, reload, isDealer, edges) {
   const { game } = detail
   const node = el('div', `seat${seat.hasCashedOut ? ' seat-out' : ''}`)
 
@@ -255,8 +257,9 @@ function seatNode(seat, detail, reload, isDealer) {
   open.setAttribute('aria-label', `${seat.player.name}, ${formatMoney(seat.netCents, game.currency, true)}`)
   const plate = el('span', 'seat-plate')
   mount(plate,
-    el('span', 'seat-name', seat.player.name + (seat.player.is_self ? ' (You)' : '')),
+    el('span', 'seat-name', seatName(seat.player.name) + (seat.player.is_self ? ' (You)' : '')),
     money(seat.netCents, game.currency, true),
+    rack(edges),
   )
   mount(open, monogram(seat.player, 'monogram'), plate)
   open.addEventListener('click', () => playerSheet(seat, detail, reload))
@@ -273,6 +276,15 @@ function seatNode(seat, detail, reload, isDealer) {
   } else if (game.status === 'live' && seat.hasCashedOut) {
     node.appendChild(el('span', 'seat-note', 'Cashed out'))
   }
+  return node
+}
+
+/** The seat's chips seen edge-on: silver bought in, green cashed out. Decoration - the net says it in words. */
+function rack({ in: bought, out }) {
+  const node = el('span', 'rack')
+  node.setAttribute('aria-hidden', 'true')
+  for (let i = 0; i < bought; i++) node.appendChild(el('i'))
+  for (let i = 0; i < out; i++) node.appendChild(el('i', 'rack-out'))
   return node
 }
 
@@ -406,14 +418,21 @@ async function rebuy(btn, seat, detail, amountCents, reload) {
   btn.disabled = true
   btn.textContent = '…'
   clearBanner()
+  const what = `${formatMoney(amountCents, detail.game.currency)} rebuy for ${seat.player.name}`
   try {
-    await addEntry({
+    const saved = await addEntry({
       gameId: detail.game.id,
       gamePlayerId: seat.gamePlayerId,
       kind: 'buyin',
       amountCents,
     })
     await reload()
+    // One tap is easy to land by accident at a crowded table, so it can be taken back from here
+    // rather than from the bottom of the player's sheet.
+    showUndo(`${what} logged.`, async () => {
+      await deleteEntry(saved.id)
+      await reload()
+    })
   } catch (e) {
     btn.disabled = false
     btn.textContent = label
@@ -463,7 +482,7 @@ function settlementSection(detail, reload) {
   if (rows.length === 0) {
     wrap.appendChild(el('p', 'muted', "Nothing to settle — everyone's square."))
   } else {
-    const list = el('div', 'list')
+    const list = el('div', 'list tickets')
     for (const r of rows) {
       const row = el('div', 'row')
       const main = el('div', 'row-main')

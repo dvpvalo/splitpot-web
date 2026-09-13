@@ -84,6 +84,25 @@ export function showNotice(message) {
   bar.hidden = false
 }
 
+/** A notice with an Undo. A failed undo is an error in its own right - it never goes quiet. */
+export function showUndo(message, undo) {
+  const bar = document.getElementById('banner')
+  clear(bar)
+  bar.className = 'banner banner-notice'
+  bar.appendChild(el('span', null, message))
+  const btn = button('Undo', async () => {
+    btn.disabled = true
+    try {
+      await undo()
+      clearBanner()
+    } catch (e) {
+      showError(`Could not undo that: ${e.message ?? e}`)
+    }
+  }, 'btn-inline')
+  bar.appendChild(btn)
+  bar.hidden = false
+}
+
 /**
  * Clears the banner ONLY if it is a notice. An error names something that did not happen to
  * the host's money, and nothing incidental - a reconnect, a token refresh - gets to decide

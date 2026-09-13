@@ -503,7 +503,7 @@ test('the results message is the one people paste into WhatsApp', () => {
 })
 
 // ---------- the oval table ----------
-import { SEAT_H, SEAT_W, pileLabel, tableLayout } from '../public/lib/table.js'
+import { RACK_MAX, SEAT_H, SEAT_W, pileLabel, rackEdges, seatName, tableLayout } from '../public/lib/table.js'
 
 test('seats never overlap, from an empty table to a full one, phone to desktop', () => {
   for (const width of [343, 358, 560, 640]) {
@@ -535,4 +535,25 @@ test('pile label groups chips, biggest first', () => {
   const f = (v) => `₹${v / 100}`
   assert.equal(pileLabel([10000, 5000, 10000], f), '2 × ₹100 + ₹50')
   assert.equal(pileLabel([], f), '')
+})
+
+test('racks scale to the deepest player and never draw money as nothing', () => {
+  const r = rackEdges([
+    { buyInCents: 60000, cashOutCents: 0 },
+    { buyInCents: 20000, cashOutCents: 35000 },
+    { buyInCents: 500, cashOutCents: 0 },
+    { buyInCents: 0, cashOutCents: 0 },
+  ])
+  assert.deepEqual(r[0], { in: RACK_MAX, out: 0 })
+  assert.equal(r[2].in, 1)
+  assert.deepEqual(r[3], { in: 0, out: 0 })
+  for (const x of r) assert.ok(x.in + x.out <= RACK_MAX)
+  assert.ok(r[1].out > 0 && r[1].in > 0)
+  assert.deepEqual(rackEdges([]), [])
+})
+
+test('seat names shorten to a first name and an initial', () => {
+  assert.equal(seatName('Soham Agarwal'), 'Soham A.')
+  assert.equal(seatName('  Darsh  '), 'Darsh')
+  assert.equal(seatName('Ana Maria Lopez'), 'Ana L.')
 })

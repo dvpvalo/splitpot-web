@@ -257,7 +257,7 @@ export async function addEntry({
     amount_cents: amountCents,
     paid,
     paid_to_player_id: paidToPlayerId,
-  })))
+  }).select('id').single()))
 }
 
 /** The live preview uses the same shape that finishing the game will commit. */

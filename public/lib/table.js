@@ -6,9 +6,12 @@
 // at the two ends and leave the long sides empty - on a phone that stacks three players on top
 // of each other at the head of the table while the sides sit bare.
 
-/** Room one seat needs on the rail: chip avatar, name plate, net, and a 44px rebuy. */
+/** Room one seat needs on the rail: chip avatar, name plate with its rack, and a 44px rebuy. */
 export const SEAT_W = 104
-export const SEAT_H = 142
+export const SEAT_H = 154
+
+/** Most chip edges a seat's rack draws. */
+export const RACK_MAX = 12
 
 /**
  * Table size and seat centres for `count` places at a table `width` px wide.
@@ -84,4 +87,25 @@ export function pileLabel(values, format) {
     .sort((x, y) => y[0] - x[0])
     .map(([v, n]) => (n === 1 ? format(v) : `${n} × ${format(v)}`))
     .join(' + ')
+}
+
+/**
+ * How many chip edges each seat's rack draws: silver for what they bought in, green for what they
+ * took back out. Scaled to the table, so the deepest player fills the rack and everyone else is
+ * drawn against them - you see who is deep in without reading a number. Anyone with money on the
+ * table gets at least one edge, so a small buy-in never draws as nothing.
+ */
+export function rackEdges(seats) {
+  const most = Math.max(0, ...seats.map((s) => s.buyInCents + s.cashOutCents))
+  const edges = (cents) => (cents > 0 ? Math.max(1, Math.round((cents / most) * RACK_MAX)) : 0)
+  return seats.map((s) => {
+    const out = edges(s.cashOutCents)
+    return { in: Math.min(edges(s.buyInCents), RACK_MAX - Math.min(out, RACK_MAX - 1)), out: Math.min(out, RACK_MAX - 1) }
+  })
+}
+
+/** "Soham A." - a first name and an initial fits a seat plate; the sheet has the full name. */
+export function seatName(name) {
+  const parts = name.trim().split(/\s+/)
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0]
 }

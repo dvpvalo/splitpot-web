@@ -7,7 +7,7 @@ import { addEntry, deleteEntry, unseatPlayer } from '../db.js'
 import { formatAmount, formatMoney, minorUnitDigits, parseMoney } from '../lib/money.js'
 import { pileLabel } from '../lib/table.js'
 import { parseInstant, relativeLabel } from '../lib/time.js'
-import { button, clear, clearBanner, el, money, monogram, mount, sheet, showError } from '../ui.js'
+import { button, clear, clearBanner, el, money, monogram, mount, sheet, showError, showUndo } from '../ui.js'
 
 /** The chip denominations in the tray, in the game's own currency. */
 const QUICK_AMOUNTS = [20, 50, 100, 200]
@@ -261,24 +261,6 @@ function removeEntry(entry, seat, detail, onSaved, close) {
   }, 'btn-rebuy btn-danger')
   btn.setAttribute('aria-label', 'Delete this entry')
   return btn
-}
-
-function showUndo(message, undo) {
-  const bar = document.getElementById('banner')
-  clear(bar)
-  bar.className = 'banner banner-notice'
-  bar.appendChild(el('span', null, message))
-  const btn = button('Undo', async () => {
-    btn.disabled = true
-    try {
-      await undo()
-      clearBanner()
-    } catch (e) {
-      showError(`Could not undo that: ${e.message ?? e}`)
-    }
-  }, 'btn-inline')
-  bar.appendChild(btn)
-  bar.hidden = false
 }
 
 /**

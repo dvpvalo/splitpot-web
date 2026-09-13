@@ -678,5 +678,12 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
      action moves to the top of the column instead, right under the header. Unusual reading
      order, but it is always visible, never covers anything, and the button carries the
      amount in its own label - which is what you are checking before you tap it. */
+  /* There are about 188px of column here, so the order is by what the sheet is FOR: pick
+     buy-in or cash-out, see the amount, tap a quick chip, commit. Everything else - the
+     running totals, this player's entries, remove-from-table - is reference and can scroll.
+     The button carries the amount in its own label, so nothing is lost by it sitting high. */
+  .sheet-body > .pills { order: -4; }
+  .sheet-body > .amount-display { order: -3; }
+  .sheet-body > .chips { order: -2; }
   .sheet-body > .btn-primary { order: -1; margin: 0 0 10px; }
 }

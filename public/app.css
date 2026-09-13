@@ -658,4 +658,12 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
   }
 
   .key { min-height: 44px; }
+
+  /* Two columns alone was not enough - the submit button still sat a few pixels below the
+     fold. Everything above it gives up its portrait breathing room, because on 375px of
+     height being reachable beats being roomy. */
+  .sheet-body { padding-top: 8px; }
+  .sheet-head { padding-top: 10px; padding-bottom: 10px; }
+  .sheet-sub { margin-bottom: 6px; }
+  .amount-display { margin: 6px 0; font-size: 1.75rem; }
 }

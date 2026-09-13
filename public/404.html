@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitpot</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<!-- This file exists to STOP the SPA fallback. Without it Cloudflare Pages answers every
+     unknown path with index.html at status 200, so a mistyped script src returns HTML that
+     fails much later as "Unexpected token '<'" instead of an honest 404. Routing does not
+     need the fallback: the router is hash-based, so every real route is a request for "/". -->
+<div id="app">
+  <main class="screen">
+    <div class="card">
+      <h1 class="wordmark">Not here</h1>
+      <p class="sub">That link does not point at anything.</p>
+      <a class="btn btn-primary" href="/" style="text-align:center;line-height:44px;text-decoration:none">Back to Splitpot</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

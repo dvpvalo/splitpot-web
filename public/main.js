@@ -3,13 +3,14 @@
 // Hash routing rather than history: every request is for "/", so there is no server rewrite
 // to configure and a deep link cannot 404 on a static host.
 
-import { LOADING, SIGNED_IN, SIGNED_OUT, signOut, watchAuth } from './auth.js'
-import { button, clearNotice, clear, el, mount, showNotice } from './ui.js'
+import { LOADING, SIGNED_IN, SIGNED_OUT, watchAuth } from './auth.js'
+import { clearNotice, clear, el, mount, showNotice } from './ui.js'
 import { gameView } from './views/game.js'
 import { historyView } from './views/history.js'
 import { homeView } from './views/home.js'
 import { newGameView } from './views/newgame.js'
 import { peopleView } from './views/people.js'
+import { settingsView } from './views/settings.js'
 import { signinView } from './views/signin.js'
 
 const app = document.getElementById('app')
@@ -29,6 +30,7 @@ const TABS = [
   { hash: '#/', label: 'Home', view: homeView },
   { hash: '#/history', label: 'History', view: historyView },
   { hash: '#/people', label: 'People', view: peopleView },
+  { hash: '#/settings', label: 'Settings', view: settingsView },
 ]
 
 const routeFor = (hash) => TABS.find((t) => t.hash === hash) ?? TABS[0]
@@ -82,8 +84,6 @@ function tabBar(active) {
     if (t === active) link.setAttribute('aria-current', 'page')
     nav.appendChild(link)
   }
-  // Settings arrives in Phase 7; until then sign out needs to live somewhere reachable.
-  nav.appendChild(button('Sign out', () => signOut(), 'tab tab-quiet'))
   return nav
 }
 

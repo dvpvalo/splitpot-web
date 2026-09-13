@@ -10,7 +10,9 @@ import {
 } from '../db.js'
 import { formatMoney, settle } from '../lib/money.js'
 import { durationLabel, longDate, parseInstant, relativeLabel } from '../lib/time.js'
-import { button, clear, clearBanner, el, money, mount, sheet, showError, showNotice } from '../ui.js'
+import {
+  button, clear, clearBanner, el, money, monogram, mount, sheet, showError, showNotice,
+} from '../ui.js'
 import { ledgerMessage, ledgerUrl } from '../lib/share.js'
 import { playerSheet } from './playersheet.js'
 
@@ -130,12 +132,6 @@ function seatSection(detail, reload, ui) {
   draw()
   mount(wrap, tabs, panel)
   return wrap
-}
-
-function monogram(player) {
-  // An emoji avatar if they picked one, otherwise initials - same rule as the phone.
-  const initials = player.name.trim().split(/\s+/).slice(0, 2).map((w) => w[0] ?? '').join('')
-  return el('span', 'monogram', player.avatar || initials.toUpperCase())
 }
 
 function seatRow(seat, detail, reload) {

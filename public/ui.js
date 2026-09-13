@@ -23,6 +23,12 @@ export function el(tag, cls, text) {
   return node
 }
 
+/** An emoji avatar if they picked one, otherwise initials - same rule as the phone. */
+export function monogram(player, cls = 'monogram') {
+  const initials = player.name.trim().split(/\s+/).slice(0, 2).map((w) => w[0] ?? '').join('')
+  return el('span', cls, player.avatar || initials.toUpperCase())
+}
+
 export function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild)
   return node

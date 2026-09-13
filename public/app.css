@@ -324,7 +324,6 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
 }
 
 .tab-on { color: var(--text); font-weight: 600; }
-.tab-quiet { flex: 0 1 auto; font-size: 0.875rem; text-decoration: none; }
 
 /* The tab bar is fixed, so the last row of content needs somewhere to end. */
 #app { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
@@ -454,3 +453,13 @@ a.card:not(.row) { flex-direction: column; gap: 4px; }
 
 /* Historical rows: present for reference, not the thing being acted on. */
 .row-quiet { opacity: 0.72; }
+
+/* ---------- avatar picker ---------- */
+
+.avatar-row { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 8px; }
+.avatar-row .chips { flex: 1; min-width: 0; }
+
+.monogram-lg { width: 48px; height: 48px; font-size: 1.125rem; }
+
+/* Square-ish, so twenty of them scroll past in a couple of swipes. */
+.chip-face { min-width: 44px; padding: 0 8px; font-size: 1.25rem; }

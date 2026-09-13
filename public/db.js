@@ -341,6 +341,70 @@ export const setSettlementPaid = (settlementId, paid) => authed(() => q(
   }).eq('id', settlementId),
 ))
 
+// ---------- the contact book ----------
+
+const playerPayload = ({ name, paymentType = 'none', paymentDetails = null, avatar = null }) => ({
+  name: name.trim(),
+  payment_type: paymentType,
+  // A blank details box means "none", not an empty string sitting in the column.
+  payment_details: paymentDetails?.trim() || null,
+  avatar,
+})
+
+export const addPlayer = (fields) => authed(() => q(
+  client.from('players').insert({ host_id: uid(), is_self: false, ...playerPayload(fields) })
+    .select().single(),
+))
+
+export const updatePlayer = (id, fields) => authed(() => q(
+  client.from('players').update(playerPayload(fields)).eq('id', id),
+))
+
+/**
+ * Removing someone from the contact book.
+ *
+ * The database CASCADES this, because account deletion depends on it - so deleting a player
+ * who has played would erase them from every past game and silently change the history.
+ * Callers must check playerGameCount() first; the UI blocks it and says why.
+ */
+export const deletePlayer = (id) => authed(() => q(
+  client.from('players').delete().eq('id', id),
+))
+
+// ---------- profile + account ----------
+
+export const saveProfile = ({
+  name, phone, defaultCurrency, smallBlindCents, bigBlindCents,
+}) => authed(() => q(client.from('profiles').update({
+  name: name.trim(),
+  phone: phone?.trim() || null,
+  default_currency: defaultCurrency,
+  default_small_blind_cents: smallBlindCents,
+  default_big_blind_cents: bigBlindCents,
+}).eq('id', uid())))
+
+/**
+ * Publishes or unpublishes the standings page. Its own call, never folded into saveProfile:
+ * this one makes every player's name and result readable by anyone holding the link, and
+ * that must never happen as a side effect of editing a phone number.
+ */
+export const setPublicHistory = (enabled) => authed(() => q(
+  client.from('profiles').update({ public_db_enabled: enabled }).eq('id', uid()),
+))
+
+/**
+ * Erases the account. `delete_my_account()` is SECURITY DEFINER and RAISES on a null uid,
+ * so it can never run without a predicate.
+ *
+ * Sign-out happens only AFTER the delete returns. Signing out first would throw away the
+ * token the delete needs, and a host told "deleted" whose rows are still there has been told
+ * something untrue - the same rule as the money writes.
+ */
+export async function deleteAccount() {
+  await authed(() => q(client.rpc('delete_my_account')))
+  await client.auth.signOut()
+}
+
 /** How many games a player has ever been seated in - the delete guard on the roster. */
 export async function playerGameCount(playerId) {
   const rows = await authed(() => q(

@@ -4,7 +4,7 @@
 // to configure and a deep link cannot 404 on a static host.
 
 import { LOADING, SIGNED_IN, SIGNED_OUT, signOut, watchAuth } from './auth.js'
-import { button, clearBanner, clear, el, mount, showNotice } from './ui.js'
+import { button, clearNotice, clear, el, mount, showNotice } from './ui.js'
 import { gameView } from './views/game.js'
 import { historyView } from './views/history.js'
 import { homeView } from './views/home.js'
@@ -98,11 +98,13 @@ watchAuth((next, session, meta) => {
   // notice. This used to fire on every auth callback, TOKEN_REFRESHED included - so a token
   // refresh landing at the wrong moment silently wiped whatever was in the banner. That is
   // fine for a notice and unacceptable for "your buy-in was NOT saved".
-  if (changed && state === SIGNED_IN) clearBanner()
+  if (changed && state === SIGNED_IN) clearNotice()
   if (changed) render()
 })
 
 window.addEventListener('hashchange', render)
 window.addEventListener('online', () => {
-  if (state === SIGNED_IN) clearBanner()
+  // Recovering the network clears a "connection lost" notice, and deliberately does NOT
+  // clear an error: a failed write is still a failed write once the wifi comes back.
+  if (state === SIGNED_IN) clearNotice()
 })

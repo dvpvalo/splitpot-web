@@ -78,6 +78,16 @@ export function showNotice(message) {
   bar.hidden = false
 }
 
+/**
+ * Clears the banner ONLY if it is a notice. An error names something that did not happen to
+ * the host's money, and nothing incidental - a reconnect, a token refresh - gets to decide
+ * they have finished reading it. Errors go when they are replaced or acted on.
+ */
+export function clearNotice() {
+  const bar = document.getElementById('banner')
+  if (bar.classList.contains('banner-notice')) clearBanner()
+}
+
 export function clearBanner() {
   const bar = document.getElementById('banner')
   clear(bar)

@@ -889,6 +889,13 @@ a.card:not(.row) { flex-direction: column; gap: 4px; align-items: flex-start; }
 
 .dealer-bar { min-height: 60px; }
 
+/* Add players: a list you tick through, seated as you tap. */
+.seat-pick-status { flex: none; font-size: 0.875rem; font-weight: 700; color: var(--muted); }
+.seat-pick:disabled { cursor: default; }
+.seat-pick-on { border-color: color-mix(in srgb, var(--up) 55%, var(--line)); background: color-mix(in srgb, var(--up) 10%, var(--surface)); }
+.seat-pick-on .seat-pick-status { color: var(--up); }
+.list + .btn-primary { margin-top: 16px; position: sticky; bottom: 0; }
+
 /* ---------- blind clock: a slim bar above the table ---------- */
 
 .clock-card {

@@ -660,10 +660,17 @@ async function shareLedger(game) {
   }
 }
 
-/** Seat someone from the roster. Anyone already at the table is not offered again. */
+/**
+ * Seat people from the roster - as many as you like in one go.
+ *
+ * Each tap seats that player immediately and ticks them; the sheet stays open for the next
+ * one. Done (or tapping outside) just closes it, and everyone tapped is already at the table,
+ * so there is no "forgot to press OK" way to lose a seat. Anyone seated before the sheet
+ * opened is not offered.
+ */
 async function seatSheet(detail, reload) {
   const body = el('div', 'sheet-body')
-  const dlg = sheet('Add a player', body)
+  const dlg = sheet('Add players', body)
   body.appendChild(el('p', 'muted', 'Loading...'))
   try {
     const roster = await players()
@@ -674,23 +681,43 @@ async function seatSheet(detail, reload) {
       body.appendChild(el('p', 'muted', 'Everyone in your list is already at this table.'))
       return
     }
+    // Counted here, not read from `detail`, which is a snapshot from when the sheet opened: two
+    // quick taps must not both claim the same seat number.
+    let nextSeat = detail.seats.length
+    let added = 0
+    const done = button('Done', () => dlg.close(), 'btn btn-primary')
+    const drawDone = () => { done.textContent = added === 0 ? 'Done' : `Done · ${added} seated` }
+
+    body.appendChild(el('p', 'muted small', 'Tap everyone who is playing. Each one is seated as you tap.'))
     const list = el('div', 'list')
     for (const p of free) {
-      const btn = button(p.name, async () => {
-        btn.disabled = true
+      const row = el('button', 'row row-tappable seat-pick')
+      row.type = 'button'
+      const status = el('span', 'seat-pick-status', 'Tap to seat')
+      const main = el('div', 'row-main')
+      main.appendChild(el('h3', 'row-title', p.name))
+      mount(row, monogram(p), main, status)
+      row.addEventListener('click', async () => {
+        row.disabled = true
+        status.textContent = 'Seating…'
+        const order = nextSeat++
         clearBanner()
         try {
-          await seatPlayer(detail.game.id, p.id, detail.seats.length)
-          dlg.close()
-          await reload()
+          await seatPlayer(detail.game.id, p.id, order)
+          row.classList.add('seat-pick-on')
+          status.textContent = '✓ Seated'
+          added++
+          drawDone()
+          reload()
         } catch (e) {
-          btn.disabled = false
+          row.disabled = false
+          status.textContent = 'Tap to seat'
           showError(`${p.name} was NOT seated: ${e.message ?? e}`)
         }
-      }, 'btn')
-      list.appendChild(btn)
+      })
+      list.appendChild(row)
     }
-    body.appendChild(list)
+    mount(body, list, done)
   } catch (e) {
     clear(body)
     body.appendChild(el('p', 'muted', `Could not load your players: ${e.message ?? e}`))

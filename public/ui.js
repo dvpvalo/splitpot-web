@@ -4,6 +4,18 @@
 // ledger page for cosmetic reasons; here the page holds a real access token in localStorage,
 // so it is guarding a bearer token. textContent, always, everywhere.
 
+import { formatMoney } from './lib/money.js'
+
+/**
+ * Money, coloured by sign. The colour comes from --up/--down/--flat, which are their own
+ * variables and never derived from --primary: in a ledger, red means money lost, and
+ * spending it on controls would make a loss look like a button.
+ */
+export function money(cents, currency, signed = false) {
+  const tone = cents > 0 ? 'up' : cents < 0 ? 'down' : 'flat'
+  return el('span', `money money-${tone}`, formatMoney(cents, currency, signed))
+}
+
 export function el(tag, cls, text) {
   const node = document.createElement(tag)
   if (cls) node.className = cls
@@ -26,6 +38,23 @@ export function button(label, onClick, cls = 'btn') {
   b.type = 'button'
   b.addEventListener('click', onClick)
   return b
+}
+
+/**
+ * A bottom sheet, which is a <dialog> so the browser handles focus trapping, Escape and
+ * the backdrop rather than this file reimplementing three accessibility features badly.
+ */
+export function sheet(title, ...content) {
+  const dlg = el('dialog', 'sheet')
+  const head = el('header', 'sheet-head')
+  mount(head, el('h2', 'sheet-title', title), button('Close', () => dlg.close(), 'btn-link'))
+  mount(dlg, head, ...content)
+  dlg.addEventListener('close', () => dlg.remove())
+  // A click on the backdrop lands on the dialog itself, never on its children.
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close() })
+  document.body.appendChild(dlg)
+  dlg.showModal()
+  return dlg
 }
 
 /**

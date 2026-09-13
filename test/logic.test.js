@@ -557,3 +557,12 @@ test('seat names shorten to a first name and an initial', () => {
   assert.equal(seatName('  Darsh  '), 'Darsh')
   assert.equal(seatName('Ana Maria Lopez'), 'Ana L.')
 })
+
+test('settlement card rows: one per payment, or a single square line', async () => {
+  const { settlementLines } = await import('../public/lib/card.js')
+  assert.deepEqual(settlementLines([], 'INR'), [["Everyone's square", '']])
+  const rows = settlementLines([{ fromName: 'Yash', toName: 'Yashraj', amountCents: 20000 }], 'INR')
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0][0], 'Yash  →  Yashraj')
+  assert.ok(rows[0][1].includes('200'))
+})

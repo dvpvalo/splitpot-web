@@ -23,6 +23,7 @@ import {
 } from '../ui.js'
 import { ledgerMessage, ledgerUrl } from '../lib/share.js'
 import { SEAT_H, SEAT_W, rackEdges, seatName, tableLayout } from '../lib/table.js'
+import { settlementCard } from '../lib/card.js'
 import { playerSheet } from './playersheet.js'
 
 export function gameView(gameId) {
@@ -638,6 +639,18 @@ function actionsSection(detail, reload) {
     wrap.appendChild(button('Share ledger', () => shareLedger(game), 'btn'))
   }
 
+  // The WhatsApp picture, same card the phone draws. Finished games only: a live preview
+  // would be a picture of numbers that are still moving.
+  const stored = storedRows(detail)
+  if (game.status !== 'live' && stored.length > 0) {
+    // Drawn as soon as the button exists, not on tap: a share sheet must open while the tap
+    // still counts as a user gesture, and drawing plus loading the font can outlast that.
+    const ready = pictureFile(game, stored, detail)
+    ready.catch(() => {})
+    const pic = button('Share as a picture', () => sharePicture(game, ready), 'btn')
+    wrap.appendChild(pic)
+  }
+
   const del = button('Delete this game', async () => {
     if (!confirm(`Delete "${game.name}"?\n\nEvery buy-in, cash-out and settlement for it is `
       + 'removed permanently. This cannot be undone.')) return
@@ -677,6 +690,49 @@ async function shareLedger(game) {
     if (e && e.name === 'AbortError') return
     showError(`Could not share that link: ${e.message ?? e}`)
   }
+}
+
+/**
+ * Hands the card to the share sheet as a PNG with the ledger link as its caption. A browser
+ * that cannot share files (most desktops) saves the picture instead, and says so. Nothing is
+ * ever sent from here - the host picks the chat and presses send.
+ */
+async function pictureFile(game, rows, detail) {
+  const canvas = await settlementCard(game, rows, detail.seats.length, detail.buyInCents)
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+  if (!blob) throw new Error('the picture could not be drawn')
+  return new File([blob], `settlement-${game.id.slice(0, 8)}.png`, { type: 'image/png' })
+}
+
+async function sharePicture(game, ready) {
+  let file
+  try {
+    file = await ready
+    const text = game.ledger_slug
+      ? `${game.name} — settle up
+${ledgerUrl({ ledgerSlug: game.ledger_slug })}`
+      : `${game.name} — settle up`
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], text })
+      return
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return
+    // NotAllowedError: the browser would not open a share sheet here. Save it instead.
+    if (!file || e?.name !== 'NotAllowedError') {
+      showError(`Could not make that picture: ${e.message ?? e}`)
+      return
+    }
+  }
+  const url = URL.createObjectURL(file)
+  const a = el('a')
+  a.href = url
+  a.download = file.name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  showNotice('Picture saved. Attach it in the chat.')
 }
 
 /**

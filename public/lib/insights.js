@@ -140,6 +140,8 @@ export function insightsFor(nights, playerId, currency, season = null) {
     tables: split(newest, (n) => tableSize.get(n.gameId), (size) => size < BIG_TABLE),
     buyInSize: buyInSize(newest),
     months: monthsOf(oldest),
+    calendar: calendarFor(newest),
+    spread: spreadFor(newest),
     deepDive: {
       typicalCents: games ? roundToMajor(median(newest.map((n) => n.netCents)), currency) : 0,
       avgWinCents: mean(winsOnly),
@@ -354,6 +356,261 @@ export function comparisonSeries(nights, playerIds, currency, season = null) {
     return { playerId: id, name, values: games.map((g) => (total += net.get(g.gameId) ?? 0)) }
   })
   return { games, series }
+}
+
+// ---------- round 3: calendar, spread, badges, rank, and the group ----------
+
+const scopedTo = (nights, currency, season) => nights.filter((n) => n.currency === currency && inSeason(n, season))
+
+/** The period's games, oldest first, each with every player's row. */
+function gamesOf(scoped) {
+  const games = new Map()
+  for (const n of [...scoped].sort(chronological)) {
+    let g = games.get(n.gameId)
+    if (!g) {
+      g = { gameId: n.gameId, gameName: n.gameName, playedOn: n.playedOn, rows: [] }
+      games.set(n.gameId, g)
+    }
+    g.rows.push(n)
+  }
+  return [...games.values()]
+}
+
+/**
+ * A player's usual buy-in: the median opening buy-in, or failing that (older rows) the median
+ * spend per buy-in. Results measured in buy-ins mean the same at ₹200 and £20 tables.
+ */
+function buyInUnit(rows) {
+  const firsts = rows.map((n) => n.firstBuyinCents).filter((c) => Number.isFinite(c) && c > 0)
+  if (firsts.length) return Math.round(median(firsts))
+  const per = rows.filter((n) => n.inCents > 0 && n.buyinCount > 0).map((n) => n.inCents / n.buyinCount)
+  return per.length ? Math.round(median(per)) : null
+}
+
+/**
+ * Every month from the first game to the last, Monday first, with each day's result (summed
+ * when two games fell on one day). Months with no games in between are kept, so a gap shows.
+ */
+export function calendarFor(rows) {
+  if (rows.length === 0) return []
+  const byDay = new Map()
+  for (const n of rows) {
+    const d = byDay.get(n.playedOn) ?? { netCents: 0, games: 0 }
+    d.netCents += n.netCents
+    d.games++
+    byDay.set(n.playedOn, d)
+  }
+  const days = [...byDay.keys()].sort()
+  let [y, m] = days[0].split('-').map(Number)
+  const [ly, lm] = days.at(-1).split('-').map(Number)
+  const out = []
+  while (y < ly || (y === ly && m <= lm)) {
+    const key = `${y}-${String(m).padStart(2, '0')}`
+    const length = new Date(Date.UTC(y, m, 0)).getUTCDate()
+    const cells = []
+    let net = 0
+    let games = 0
+    for (let d = 1; d <= length; d++) {
+      const date = `${key}-${String(d).padStart(2, '0')}`
+      const hit = byDay.get(date)
+      if (hit) { net += hit.netCents; games += hit.games }
+      cells.push({ date, day: d, netCents: hit ? hit.netCents : null, games: hit ? hit.games : 0 })
+    }
+    out.push({ key, label: `${MONTHS[m - 1]} ${y}`, lead: (weekdayOf(`${key}-01`) + 6) % 7, days: cells, netCents: net, games })
+    m++
+    if (m > 12) { m = 1; y++ }
+  }
+  return out
+}
+
+/** One night's result in that night's own buy-ins: a ₹500 game is not five ₹100 games. */
+function inBuyIns(n, fallback) {
+  const unit = n.firstBuyinCents > 0 ? n.firstBuyinCents : n.inCents > 0 && n.buyinCount > 0 ? n.inCents / n.buyinCount : fallback
+  return n.netCents / unit
+}
+
+/**
+ * How results spread out, each game measured in its own buy-in, plus a "swing": the standard
+ * deviation of a night's result in buy-ins. Under 1 is Steady, under 2 Swingy, otherwise Wild.
+ * Null under three games or with no buy-in to measure against.
+ */
+export function spreadFor(rows) {
+  const unit = buyInUnit(rows)
+  if (rows.length < 3 || !unit) return null
+  const bands = [
+    { key: 'bigLoss', label: 'Lost 2+ buy-ins', count: 0 },
+    { key: 'loss', label: 'Lost under 2', count: 0 },
+    { key: 'level', label: 'Level', count: 0 },
+    { key: 'win', label: 'Won under 2', count: 0 },
+    { key: 'bigWin', label: 'Won 2+ buy-ins', count: 0 },
+  ]
+  const bs = rows.map((n) => inBuyIns(n, unit))
+  for (const b of bs) bands[b <= -2 ? 0 : b < 0 ? 1 : b === 0 ? 2 : b < 2 ? 3 : 4].count++
+  const mean = bs.reduce((s, b) => s + b, 0) / bs.length
+  const sd = Math.sqrt(bs.reduce((s, b) => s + (b - mean) ** 2, 0) / bs.length)
+  const swing = Math.round(sd * 10) / 10
+  return { bands, swing, style: swing < 1 ? 'Steady' : swing < 2 ? 'Swingy' : 'Wild' }
+}
+
+/**
+ * Milestones over a player's whole history in one currency (never one period: a badge, once
+ * earned, stays). `on` is the date it was earned, `progress` how far along a counted one is.
+ */
+export function badgesFor(nights, playerId, currency) {
+  const all = nights.filter((n) => n.currency === currency)
+  const mine = all.filter((n) => n.playerId === playerId).sort(chronological)
+  const unit = buyInUnit(mine)
+  const topOf = new Map()
+  for (const n of all) topOf.set(n.gameId, Math.max(topOf.get(n.gameId) ?? -Infinity, n.netCents))
+  const first = (pred) => mine.find(pred)?.playedOn ?? null
+
+  let run = 0
+  let hatTrick = null
+  for (const n of mine) {
+    run = n.netCents > 0 ? run + 1 : 0
+    if (run === 3 && !hatTrick) hatTrick = n.playedOn
+  }
+  let total = 0
+  let shark = null
+  for (const n of mine) {
+    total += n.netCents
+    if (unit && !shark && total >= 10 * unit) shark = n.playedOn
+  }
+  const played = (need) => ({ have: Math.min(mine.length, need), need })
+  const badge = (key, label, desc, on, progress = null) => ({ key, label, desc, earned: on !== null, on, progress })
+  return [
+    badge('first-win', 'First win', 'Finished a game up', first((n) => n.netCents > 0)),
+    badge('hat-trick', 'Hat-trick', 'Three wins in a row', hatTrick),
+    badge('top', 'Top of the table', 'Best result at the table in a game', first((n) => n.netCents > 0 && n.netCents === topOf.get(n.gameId))),
+    badge('comeback', 'Comeback', 'Won a game after rebuying twice or more', first((n) => n.netCents > 0 && n.buyinCount >= 3)),
+    badge('big-night', 'Big night', 'Won three buy-ins or more in one game', unit ? first((n) => inBuyIns(n, unit) >= 3) : null),
+    badge('regular', 'Regular', 'Played 10 games', mine[9]?.playedOn ?? null, played(10)),
+    badge('veteran', 'Veteran', 'Played 25 games', mine[24]?.playedOn ?? null, played(25)),
+    badge('shark', 'Shark', 'Up ten buy-ins all time', shark,
+      unit ? { have: Math.max(0, Math.min(10, Math.floor(total / unit))), need: 10 } : null),
+  ]
+}
+
+/**
+ * Where the player stood after every game in the period, from their first one on: rank by
+ * running total among everyone who had played so far (ties share a rank). Games they sat out
+ * still count - other people's results move them too.
+ */
+export function rankHistory(nights, playerId, currency, season = null) {
+  const totals = new Map()
+  const out = []
+  for (const g of gamesOf(scopedTo(nights, currency, season))) {
+    for (const n of g.rows) totals.set(n.playerId, (totals.get(n.playerId) ?? 0) + n.netCents)
+    if (!totals.has(playerId)) continue
+    const mine = totals.get(playerId)
+    let ahead = 0
+    for (const v of totals.values()) if (v > mine) ahead++
+    out.push({
+      gameId: g.gameId, gameName: g.gameName, playedOn: g.playedOn, rank: ahead + 1, of: totals.size,
+      played: g.rows.some((n) => n.playerId === playerId),
+    })
+  }
+  return out
+}
+
+/** Round gridlines for a rank axis: every place up to six, otherwise about five steps. */
+export function rankTicks(worst) {
+  if (worst <= 6) return Array.from({ length: worst }, (_, i) => i + 1)
+  const step = Math.ceil((worst - 1) / 4)
+  const ticks = []
+  for (let r = 1; r < worst; r += step) ticks.push(r)
+  return [...ticks, worst]
+}
+
+/** The group's records for the period. A record nobody set (no rebuys, no timed game) is null. */
+export function hallOfFame(nights, currency, season = null) {
+  const games = gamesOf(scopedTo(nights, currency, season))
+  if (games.length === 0) return null
+  const rows = games.flatMap((g) => g.rows)
+  // Strictly greater, so the first (oldest) holder keeps a tied record.
+  const maxBy = (items, score) => items.reduce((best, x) => (score(x) > score(best) ? x : best))
+  const pot = (g) => g.rows.reduce((s, n) => s + n.inCents, 0)
+  const who = (n) => ({ playerId: n.playerId, playerName: n.playerName, isSelf: n.isSelf, gameName: n.gameName, playedOn: n.playedOn })
+  const where = (g) => ({ gameName: g.gameName, playedOn: g.playedOn })
+
+  const bigPot = maxBy(games, pot)
+  const win = maxBy(rows, (n) => n.netCents)
+  const loss = maxBy(rows, (n) => -n.netCents)
+  const counted = rows.filter((n) => Number.isFinite(n.buyinCount))
+  const rebuys = counted.length ? maxBy(counted, (n) => n.buyinCount) : null
+  const timed = games.map((g) => ({ g, h: hoursOf(g.rows[0]) })).filter((x) => x.h !== null)
+  const longest = timed.length ? maxBy(timed, (x) => x.h) : null
+  const crowd = maxBy(games, (g) => g.rows.length)
+  return {
+    pot: { ...where(bigPot), cents: pot(bigPot) },
+    win: win.netCents > 0 ? { ...who(win), cents: win.netCents } : null,
+    loss: loss.netCents < 0 ? { ...who(loss), cents: loss.netCents } : null,
+    rebuys: rebuys && rebuys.buyinCount >= 2 ? { ...who(rebuys), count: rebuys.buyinCount - 1 } : null,
+    longest: longest ? { ...where(longest.g), hours: longest.h } : null,
+    table: { ...where(crowd), players: crowd.rows.length },
+  }
+}
+
+/**
+ * Who turns up: games played out of the period's games, and the current run of the latest
+ * games in a row they sat in. Most games first.
+ */
+export function attendanceFor(nights, currency, season = null) {
+  const games = gamesOf(scopedTo(nights, currency, season))
+  const people = new Map()
+  for (const g of games) {
+    for (const n of g.rows) {
+      const p = people.get(n.playerId) ?? { playerId: n.playerId, playerName: n.playerName, isSelf: n.isSelf, games: 0 }
+      p.games++
+      people.set(n.playerId, p)
+    }
+  }
+  const rows = [...people.values()].map((p) => {
+    let streak = 0
+    for (let i = games.length - 1; i >= 0 && games[i].rows.some((n) => n.playerId === p.playerId); i--) streak++
+    return { ...p, pct: pct(p.games, games.length), streak }
+  })
+  rows.sort((a, b) => b.games - a.games || b.streak - a.streak || cmp(a.playerName, b.playerName))
+  return { games: games.length, rows }
+}
+
+/**
+ * The whole table for the period: games, money across the table (every buy-in), money that
+ * changed hands (every winner's profit), the average pot and table, and each game's pot.
+ */
+export function groupTotals(nights, currency, season = null) {
+  const games = gamesOf(scopedTo(nights, currency, season))
+  if (games.length === 0) return null
+  const pots = games.map((g) => ({
+    gameId: g.gameId, gameName: g.gameName, playedOn: g.playedOn,
+    potCents: g.rows.reduce((s, n) => s + n.inCents, 0), players: g.rows.length,
+  }))
+  const rows = games.flatMap((g) => g.rows)
+  const totalCents = pots.reduce((s, p) => s + p.potCents, 0)
+  return {
+    games: games.length,
+    players: new Set(rows.map((n) => n.playerId)).size,
+    totalCents,
+    changedHandsCents: rows.reduce((s, n) => s + Math.max(0, n.netCents), 0),
+    avgPotCents: roundToMajor(totalCents / games.length, currency),
+    avgPlayers: Math.round((rows.length / games.length) * 10) / 10,
+    pots,
+  }
+}
+
+/**
+ * Everyone against everyone, for the `max` players with the most games: cell [i][j] is how
+ * often player i finished ahead of j, and behind, in games both played. Null on the diagonal.
+ */
+export function h2hGrid(nights, currency, season = null, max = 6) {
+  const { rows } = attendanceFor(nights, currency, season)
+  const players = rows.slice(0, max).map(({ playerId, playerName, isSelf }) => ({ playerId, playerName, isSelf }))
+  const cells = players.map((a) => players.map((b) => {
+    if (a.playerId === b.playerId) return null
+    const h = headToHead(nights, a.playerId, b.playerId, currency, season)
+    return { together: h.together, ahead: h.aAhead, behind: h.bAhead }
+  }))
+  return { players, cells, more: rows.length - players.length }
 }
 
 // ---------- chart helpers ----------

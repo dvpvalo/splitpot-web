@@ -792,3 +792,97 @@ test('game names get a capital first letter and nothing else changes', async () 
   assert.equal(capitalizeFirst('200 kk'), '200 kk')
   assert.equal(capitalizeFirst(''), '')
 })
+
+// ---------- insights round 3 (port: InsightsTest.kt) ----------
+
+// Five games, every one summing to zero. G5 sat open 20h, so it has no believable length.
+const grow = (playerId, gameId, playedOn, start, hours, inCents, outCents, buyinCount) => ({
+  playerId, playerName: playerId, isSelf: playerId === 'me', gameId, gameName: gameId, playedOn,
+  startedAt: `${playedOn}T${start}:00:00Z`,
+  finishedAt: new Date(Date.parse(`${playedOn}T${start}:00:00Z`) + hours * 3_600_000).toISOString(),
+  currency: 'INR', inCents, outCents, netCents: outCents - inCents, buyinCount, firstBuyinCents: 100,
+})
+const group = [
+  grow('me', 'G1', '2026-09-01', '20', 3, 100, 300, 1), grow('dan', 'G1', '2026-09-01', '20', 3, 200, 0, 2),
+  grow('me', 'G2', '2026-09-03', '20', 3, 300, 0, 3), grow('dan', 'G2', '2026-09-03', '20', 3, 100, 400, 1),
+  grow('eve', 'G2', '2026-09-03', '20', 3, 100, 100, 1),
+  grow('me', 'G3', '2026-09-08', '20', 5, 300, 700, 3), grow('eve', 'G3', '2026-09-08', '20', 5, 100, 0, 1),
+  grow('dan', 'G3', '2026-09-08', '20', 5, 300, 0, 3),
+  grow('me', 'G4', '2026-10-02', '18', 3, 100, 250, 1), grow('eve', 'G4', '2026-10-02', '18', 3, 200, 50, 2),
+  grow('dan', 'G5', '2026-10-02', '21', 20, 100, 200, 1), grow('eve', 'G5', '2026-10-02', '21', 20, 100, 0, 1),
+]
+
+test('insights 3: result calendar runs month by month, Monday first', async () => {
+  const { insightsFor } = await import('../public/lib/insights.js')
+  const cal = insightsFor(group, 'me', 'INR').calendar
+  assert.deepEqual(cal.map((m) => [m.key, m.lead, m.days.length, m.netCents, m.games]),
+    [['2026-09', 1, 30, 300, 3], ['2026-10', 3, 31, 150, 1]], '1 Sep 2026 is a Tuesday, 1 Oct a Thursday')
+  assert.deepEqual(cal[0].days.filter((d) => d.netCents !== null).map((d) => [d.day, d.netCents]), [[1, 200], [3, -300], [8, 400]])
+})
+
+test('insights 3: results spread in buy-ins, and the swing', async () => {
+  const { insightsFor } = await import('../public/lib/insights.js')
+  const s = insightsFor(group, 'me', 'INR').spread
+  assert.deepEqual(s.bands.map((b) => b.count), [1, 0, 0, 1, 2], '+2 buy-ins is a big win, -3 a big loss')
+  // Each night in its own buy-in: +₹10 at a ₹5 table is 2 buy-ins, -₹10 at a ₹10 table is 1.
+  const mixed = [inight('me', 'a', '2026-09-01', 1000), inight('me', 'b', '2026-09-02', -1000), inight('me', 'c', '2026-09-03', 0)]
+  mixed[0].firstBuyinCents = 500
+  mixed[1].firstBuyinCents = 1000
+  mixed[2].firstBuyinCents = 1000
+  assert.deepEqual(insightsFor(mixed, 'me', 'INR').spread.bands.map((b) => b.count), [0, 1, 1, 0, 1])
+  assert.equal(s.swing, 2.6)
+  assert.equal(s.style, 'Wild')
+  assert.equal(insightsFor(group.slice(0, 2), 'me', 'INR').spread, null, 'under three games: no spread')
+})
+
+test('insights 3: badges, with the day each was earned', async () => {
+  const { badgesFor } = await import('../public/lib/insights.js')
+  const b = Object.fromEntries(badgesFor(group, 'me', 'INR').map((x) => [x.key, x]))
+  assert.equal(b['first-win'].on, '2026-09-01')
+  assert.equal(b['hat-trick'].earned, false, 'win, loss, win, win is not three in a row')
+  assert.equal(b.top.on, '2026-09-01')
+  assert.equal(b.comeback.on, '2026-09-08')
+  assert.equal(b['big-night'].on, '2026-09-08')
+  assert.deepEqual(b.regular.progress, { have: 4, need: 10 })
+  assert.equal(b.shark.earned, false)
+  assert.deepEqual(b.shark.progress, { have: 4, need: 10 }, '₹4.50 up on ₹1 buy-ins is 4 buy-ins')
+})
+
+test('insights 3: rank over time counts games they sat out', async () => {
+  const { rankHistory, rankTicks } = await import('../public/lib/insights.js')
+  const r = rankHistory(group, 'me', 'INR')
+  assert.deepEqual(r.map((x) => x.rank), [1, 3, 1, 1, 1])
+  assert.deepEqual(r.map((x) => x.of), [2, 3, 3, 3, 3])
+  assert.deepEqual(r.map((x) => x.played), [true, true, true, true, false])
+  assert.deepEqual(rankTicks(4), [1, 2, 3, 4])
+  assert.deepEqual(rankTicks(13), [1, 4, 7, 10, 13])
+})
+
+test('insights 3: hall of fame, the oldest holder keeps a tie', async () => {
+  const { hallOfFame } = await import('../public/lib/insights.js')
+  const h = hallOfFame(group, 'INR')
+  assert.deepEqual([h.pot.gameName, h.pot.cents], ['G3', 700])
+  assert.deepEqual([h.win.playerName, h.win.cents], ['me', 400])
+  assert.deepEqual([h.loss.playerName, h.loss.gameName, h.loss.cents], ['me', 'G2', -300])
+  assert.deepEqual([h.rebuys.playerName, h.rebuys.gameName, h.rebuys.count], ['me', 'G2', 2])
+  assert.deepEqual([h.longest.gameName, h.longest.hours], ['G3', 5], 'G5 sat open 20h and is not a record')
+  assert.deepEqual([h.table.gameName, h.table.players], ['G2', 3])
+  assert.equal(hallOfFame(group, 'GBP'), null)
+})
+
+test('insights 3: attendance, group totals and the head-to-head grid', async () => {
+  const { attendanceFor, groupTotals, h2hGrid } = await import('../public/lib/insights.js')
+  const a = attendanceFor(group, 'INR')
+  assert.equal(a.games, 5)
+  assert.deepEqual(a.rows.map((r) => [r.playerName, r.games, r.pct, r.streak]),
+    [['eve', 4, 80, 4], ['dan', 4, 80, 1], ['me', 4, 80, 0]], 'eve sat in G2-G5, the last four in a row')
+  const t = groupTotals(group, 'INR')
+  assert.deepEqual([t.games, t.players, t.totalCents, t.changedHandsCents, t.avgPotCents, t.avgPlayers], [5, 3, 2000, 1150, 400, 2.4])
+  assert.deepEqual(t.pots.map((p) => p.potCents), [300, 500, 700, 300, 200])
+  const g = h2hGrid(group, 'INR', null, 2)
+  assert.deepEqual(g.players.map((p) => p.playerName), ['eve', 'dan'])
+  assert.deepEqual(g.cells[0][1], { together: 3, ahead: 1, behind: 2 })
+  assert.deepEqual(g.cells[1][0], { together: 3, ahead: 2, behind: 1 })
+  assert.equal(g.cells[0][0], null)
+  assert.equal(g.more, 1)
+})

@@ -7,8 +7,9 @@
 
 import { hostStats, players } from '../db.js'
 import {
-  BIG_TABLE, LONG_GAME_HOURS, compactMoney, comparisonSeries, currenciesFor, hoursLabel,
-  insightsFor, niceTicks, rivalsFor, sampleNights, trendBy,
+  BIG_TABLE, LONG_GAME_HOURS, attendanceFor, badgesFor, compactMoney, comparisonSeries, currenciesFor,
+  groupTotals, h2hGrid, hallOfFame, hoursLabel, insightsFor, niceTicks, rankHistory, rankTicks, rivalsFor,
+  sampleNights, trendBy,
 } from '../lib/insights.js'
 import { formatMoney } from '../lib/money.js'
 import { seasonsIn, standingsFor } from '../lib/stats.js'
@@ -32,6 +33,22 @@ const GLYPHS = {
   coins: '<ellipse cx="9" cy="7" rx="5" ry="2.5"/><path d="M4 7v4c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5V7M10 15.5c.9 1.2 2.9 2 5 2 2.8 0 5-1.1 5-2.5v-4c0-1.4-2.2-2.5-5-2.5"/>',
   door: '<path d="M6 20V4h9v16M15 20h3M11 12h.01"/>',
   person: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  medal: '<path d="M8 3l2.5 7M16 3l-2.5 7"/><circle cx="12" cy="15" r="5"/>',
+  star: '<path d="M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z"/>',
+  crown: '<path d="M4 8l4 4 4-6 4 6 4-4-2 10H6z"/>',
+  rebound: '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/>',
+  moon: '<path d="M19 14.5A7.5 7.5 0 1 1 9.5 5a6 6 0 0 0 9.5 9.5z"/>',
+  shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>',
+  fin: '<path d="M4 18c5 0 8-2 10-6s2-7 1-9c4 3 6 8 5 15M3 18h18"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+  group: '<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19a6 6 0 0 1 12 0M14 19a4.5 4.5 0 0 1 7-3.7"/>',
+  podium: '<path d="M4 20h16M6 20v-6h4v6M10 20V8h4v12M14 20v-9h4v9"/>',
+  bars: '<path d="M4 20h16M6 16v4M10 10v10M14 6v14M18 12v8"/>',
+}
+
+const BADGE_GLYPHS = {
+  'first-win': 'star', 'hat-trick': 'flame', top: 'crown', comeback: 'rebound',
+  'big-night': 'moon', regular: 'person', veteran: 'shield', shark: 'fin',
 }
 
 function glyph(key, cls = 'ins-glyph') {
@@ -88,6 +105,7 @@ function screen(realNights, roster) {
     rivalsShown: 4,
     recentShown: 5,
     boardShown: 5,
+    attendShown: 5,
     compare: null,
   }
 
@@ -153,11 +171,15 @@ function screen(realNights, roster) {
         tile('door', 'Went home empty', bigText(`${r.bust.pct}%`),
           `${r.bust.nights} of ${r.games} ${r.games === 1 ? 'game' : 'games'} cashed out nothing`),
       ),
+      badgesCard(badgesFor(nights, state.player, cur)),
       tendencies(r, cur),
+      calendarCard(r, cur),
       rivalsCard(nights, state, season, personOf, draw),
       monthsCard(r, cur),
       timeCard(r, cur),
       trendCard(r, cur, state, draw),
+      rankCard(nights, state, season),
+      spreadCard(r),
       deepDive(r, cur, you),
       recentCard(r, cur, state, draw),
     )
@@ -590,7 +612,8 @@ function standingsTab(nights, state, season, personOf, redraw) {
     }))
     cmp.appendChild(el('p', 'chart-hint', 'Touch or drag for exact results'))
   }
-  return [board, cmp]
+  return [board, totalsCard(nights, state, season), fameCard(nights, state, season),
+    attendanceCard(nights, state, season, personOf, redraw), cmp, gridCard(nights, state, season, personOf)]
 }
 
 /** Up to five players in the comparison. A sheet of checkboxes; changes apply as you tick. */
@@ -619,6 +642,241 @@ function editCompare(rows, state, redraw) {
   sheet('Players in chart', body)
 }
 
+// ---------- badges ----------
+
+function badgesCard(badges) {
+  const earned = badges.filter((b) => b.earned).length
+  const card = el('section', 'card')
+  card.appendChild(cardHead('medal', 'Badges', `${earned} of ${badges.length} earned · all time`))
+  const grid = el('div', 'badge-grid')
+  for (const b of badges) {
+    const item = el('div', `badge${b.earned ? ' badge-on' : ''}`)
+    const sub = b.earned ? `Earned ${shortDate(b.on)}` : b.progress ? `${b.progress.have} of ${b.progress.need}` : 'Not yet'
+    mount(item, glyph(BADGE_GLYPHS[b.key] ?? 'medal', 'badge-icon'), el('p', 'badge-name', b.label),
+      el('p', 'badge-desc', b.desc), el('p', 'badge-sub', sub))
+    if (!b.earned && b.progress) {
+      const fill = el('span', 'badge-fill')
+      fill.style.width = `${(b.progress.have / b.progress.need) * 100}%`
+      item.appendChild(mount(el('span', 'badge-bar'), fill))
+    }
+    grid.appendChild(item)
+  }
+  card.appendChild(grid)
+  return card
+}
+
+// ---------- result calendar ----------
+
+function calendarCard(r, cur) {
+  if (r.calendar.length === 0) return null
+  const card = el('section', 'card')
+  card.appendChild(cardHead('calendar', 'Result calendar', 'Every game day: green finished up, red finished down'))
+  const months = el('div', 'cal-months')
+  for (const m of r.calendar) {
+    const grid = el('div', 'cal-grid')
+    grid.setAttribute('role', 'img')
+    const played = m.days.filter((d) => d.netCents !== null)
+    grid.setAttribute('aria-label', played.length
+      ? `${m.label}: ${played.map((d) => `${shortDate(d.date)} ${formatMoney(d.netCents, cur, true)}`).join(', ')}`
+      : `${m.label}: no games`)
+    for (const d of ['M', 'T', 'W', 'T', 'F', 'S', 'S']) grid.appendChild(el('span', 'cal-dow', d))
+    for (let i = 0; i < m.lead; i++) grid.appendChild(el('span', 'cal-pad'))
+    for (const d of m.days) {
+      const tone = d.netCents === null ? '' : d.netCents > 0 ? ' cal-up' : d.netCents < 0 ? ' cal-down' : ' cal-flat'
+      grid.appendChild(el('span', `cal-day${tone}`, d.day))
+    }
+    months.appendChild(mount(el('div', 'cal-month'),
+      mount(el('div', 'cal-head'), el('span', 'cal-name', m.label),
+        m.games ? money(m.netCents, cur, true) : el('span', 'muted small', 'No games')),
+      grid))
+  }
+  card.appendChild(months)
+  return card
+}
+
+// ---------- rank over time ----------
+
+function rankCard(nights, state, season) {
+  const h = rankHistory(nights, state.player, state.currency, season)
+  const worst = Math.max(0, ...h.map((x) => x.of))
+  if (h.length < 2 || worst < 2) return null
+  const now = h.at(-1)
+  const best = Math.min(...h.map((x) => x.rank))
+  const low = Math.max(...h.map((x) => x.rank))
+  const card = el('section', 'card')
+  card.appendChild(cardHead('podium', 'Rank over time', 'Place in the group after every game, by total result'))
+  card.appendChild(mount(el('div', 'ins-trend-sum'), el('strong', 'rank-now', `#${now.rank}`),
+    el('span', 'muted', ` of ${now.of} now · best #${best} · lowest #${low}`)))
+  card.appendChild(lineChart({
+    currency: state.currency,
+    labels: h.map((x) => axisDate(x.playedOn, 'session')),
+    series: [{ name: 'Rank', values: h.map((x) => x.rank), tone: 'series-1' }],
+    ticks: rankTicks(worst),
+    format: (v) => `#${v}`,
+    invert: true,
+    area: false,
+    tip: (i) => [
+      el('strong', null, h[i].gameName),
+      el('span', 'muted', shortDate(h[i].playedOn)),
+      tipLine('Rank:', el('strong', null, `#${h[i].rank} of ${h[i].of}`)),
+      h[i].played ? null : el('span', 'muted', 'Sat this one out'),
+    ].filter(Boolean),
+    describe: `Rank after each of ${h.length} games, now ${now.rank} of ${now.of}`,
+  }))
+  card.appendChild(el('p', 'chart-hint', 'Touch or drag for each game'))
+  return card
+}
+
+// ---------- results spread ----------
+
+const SWING_WORDS = {
+  Steady: 'Results stay close to the buy-in either way.',
+  Swingy: 'A few big nights each way.',
+  Wild: 'Big wins and big losses are both normal.',
+}
+
+function spreadCard(r) {
+  const s = r.spread
+  if (!s) return null
+  const card = el('section', 'card')
+  card.appendChild(cardHead('bars', 'Results spread', 'Each game measured in its own buy-in'))
+  mount(card,
+    mount(el('div', 'spread-style'), el('span', `spread-chip spread-${s.style.toLowerCase()}`, s.style),
+      el('span', 'muted', `Typical swing ${s.swing} buy-ins a game`)),
+    el('p', 'tile-sub', SWING_WORDS[s.style]))
+  const most = Math.max(...s.bands.map((b) => b.count)) || 1
+  const bars = el('div', 'spread-bars')
+  for (const b of s.bands) {
+    const fill = el('span', `spread-fill spread-${b.key}`)
+    fill.style.width = `${(b.count / most) * 100}%`
+    mount(bars, el('span', 'spread-label', b.label), mount(el('span', 'spread-track'), fill), el('span', 'spread-count', b.count))
+  }
+  card.appendChild(bars)
+  return card
+}
+
+// ---------- the group: totals, hall of fame, attendance, grid ----------
+
+function totalsCard(nights, state, season) {
+  const cur = state.currency
+  const t = groupTotals(nights, cur, season)
+  if (!t) return null
+  const card = el('section', 'card')
+  card.appendChild(cardHead('coins', 'Group totals', `Every finished game · ${season.label}`))
+  const big = (cents) => mount(el('p', 'ins-tile-value'), money(cents, cur))
+  const grid = pair(
+    tile(null, 'Games', bigText(String(t.games)), `${t.players} ${t.players === 1 ? 'player' : 'players'} in all`),
+    tile(null, 'Across the table', big(t.totalCents), 'Every buy-in added up'),
+    tile(null, 'Changed hands', big(t.changedHandsCents), 'What the winners took home'),
+    tile(null, 'Average pot', big(t.avgPotCents), `${t.avgPlayers} players a game`),
+  )
+  grid.classList.add('ins-grid-inner')
+  card.appendChild(grid)
+  if (t.pots.length >= 2) {
+    card.appendChild(el('p', 'ins-mini', 'Pot per game'))
+    card.appendChild(lineChart({
+      currency: cur,
+      labels: t.pots.map((p) => axisDate(p.playedOn, 'session')),
+      series: [{ name: 'Pot', values: t.pots.map((p) => p.potCents), tone: 'series-2' }],
+      area: false,
+      tip: (i) => [
+        el('strong', null, t.pots[i].gameName),
+        el('span', 'muted', `${shortDate(t.pots[i].playedOn)} · ${t.pots[i].players} players`),
+        tipLine('Pot:', money(t.pots[i].potCents, cur)),
+      ],
+      describe: `Pot of each of ${t.pots.length} games, averaging ${formatMoney(t.avgPotCents, cur)}`,
+    }))
+  }
+  return card
+}
+
+function fameCard(nights, state, season) {
+  const cur = state.currency
+  const h = hallOfFame(nights, cur, season)
+  if (!h) return null
+  const card = el('section', 'card')
+  card.appendChild(cardHead('crown', 'Hall of fame', `Group records · ${season.label}`))
+  const name = (x) => (x.isSelf ? `${x.playerName} (You)` : x.playerName)
+  const where = (x) => `${x.gameName} · ${shortDate(x.playedOn)}`
+  const row = (icon, title, who, value) => mount(el('div', 'fame-row'),
+    glyph(icon, 'fame-icon'), mount(el('div', 'fame-main'), el('p', 'fame-title', title), el('p', 'fame-who', who)), value)
+  const cash = (cents, signed) => mount(el('span', 'fame-value'), money(cents, cur, signed))
+  const text = (t) => el('strong', 'fame-value', t)
+  card.appendChild(mount(el('div', 'fame-list'),
+    row('coins', 'Biggest pot', where(h.pot), cash(h.pot.cents, false)),
+    h.win ? row('up', 'Biggest win', `${name(h.win)} · ${where(h.win)}`, cash(h.win.cents, true)) : null,
+    h.loss ? row('down', 'Biggest loss', `${name(h.loss)} · ${where(h.loss)}`, cash(h.loss.cents, true)) : null,
+    h.rebuys ? row('rebound', 'Most rebuys in a game', `${name(h.rebuys)} · ${where(h.rebuys)}`, text(String(h.rebuys.count))) : null,
+    h.longest ? row('clock', 'Longest game', where(h.longest), text(hoursLabel(h.longest.hours))) : null,
+    row('group', 'Biggest table', where(h.table), text(`${h.table.players} players`)),
+  ))
+  return card
+}
+
+function attendanceCard(nights, state, season, personOf, redraw) {
+  const a = attendanceFor(nights, state.currency, season)
+  if (a.games === 0) return null
+  const card = el('section', 'card')
+  card.appendChild(cardHead('group', 'Attendance', `Who turns up, out of ${a.games} ${a.games === 1 ? 'game' : 'games'}`))
+  const list = el('div', 'att-list')
+  for (const r of a.rows.slice(0, state.attendShown)) {
+    const fill = el('span', 'att-fill')
+    fill.style.width = `${r.pct}%`
+    list.appendChild(mount(el('div', 'att-row'),
+      monogram(personOf(r.playerId), 'mono-sm'),
+      mount(el('div', 'att-main'),
+        mount(el('div', 'att-top'), el('span', 'att-name', r.isSelf ? `${r.playerName} (You)` : r.playerName),
+          el('span', 'att-count', `${r.games} of ${a.games} · ${r.pct}%`)),
+        mount(el('span', 'att-track'), fill),
+        el('p', 'att-streak', r.streak >= 2 ? `Here for the last ${r.streak} in a row`
+          : r.streak === 1 ? 'Played the latest game' : 'Missed the latest game'))))
+  }
+  card.appendChild(list)
+  if (a.rows.length > state.attendShown) {
+    card.appendChild(button(`Show ${Math.min(5, a.rows.length - state.attendShown)} more`,
+      () => { state.attendShown += 5; redraw() }, 'btn-more'))
+  }
+  return card
+}
+
+function gridCard(nights, state, season, personOf) {
+  const g = h2hGrid(nights, state.currency, season)
+  if (g.players.length < 2) return null
+  const card = el('section', 'card')
+  card.appendChild(cardHead('grid', 'Head-to-head grid',
+    'Each row against each column: games finished ahead – behind, in games both played'))
+  const table = el('table', 'h2h-grid')
+  const head = el('tr')
+  head.appendChild(el('th'))
+  for (const p of g.players) {
+    const th = el('th')
+    th.setAttribute('scope', 'col')
+    th.title = p.playerName
+    head.appendChild(mount(th, monogram(personOf(p.playerId), 'mono-sm')))
+  }
+  table.appendChild(mount(el('thead'), head))
+  const tbody = el('tbody')
+  g.players.forEach((p, i) => {
+    const tr = el('tr')
+    const th = el('th', 'h2h-who')
+    th.setAttribute('scope', 'row')
+    tr.appendChild(mount(th, monogram(personOf(p.playerId), 'mono-sm'), el('span', 'h2h-row-name', p.isSelf ? 'You' : p.playerName)))
+    g.cells[i].forEach((c, j) => {
+      if (c === null) { tr.appendChild(el('td', 'h2h-self', '—')); return }
+      if (c.together === 0) { tr.appendChild(el('td', 'h2h-none', '·')); return }
+      const tone = c.ahead > c.behind ? 'h2h-win' : c.ahead < c.behind ? 'h2h-lose' : 'h2h-even'
+      const td = el('td', tone, `${c.ahead}–${c.behind}`)
+      td.title = `${p.playerName} vs ${g.players[j].playerName}: ahead ${c.ahead}, behind ${c.behind}, ${c.together} together`
+      tr.appendChild(td)
+    })
+    tbody.appendChild(tr)
+  })
+  table.appendChild(tbody)
+  card.appendChild(mount(el('div', 'h2h-scroll'), table))
+  if (g.more > 0) card.appendChild(el('p', 'tile-sub', `The ${g.players.length} players with the most games. ${g.more} more on the leaderboard.`))
+  return card
+}
+
 // ---------- the line chart ----------
 
 /**
@@ -628,7 +886,7 @@ function editCompare(rows, state, redraw) {
  * The curve is monotone (Fritsch-Carlson): it bends between points but never overshoots
  * them, so a smooth line can not show a high or low that never happened.
  */
-function lineChart({ currency, labels, series, tip, describe }) {
+function lineChart({ currency, labels, series, tip, describe, ticks: fixedTicks, format, invert = false, area = true }) {
   const box = el('div', 'chart')
   const tipBox = el('div', 'chart-tip')
   tipBox.hidden = true
@@ -642,7 +900,8 @@ function lineChart({ currency, labels, series, tip, describe }) {
   const H = 200
   const PAD = { l: 46, r: 10, t: 12, b: 26 }
   const all = series.flatMap((s) => s.values)
-  const ticks = niceTicks(Math.min(...all), Math.max(...all))
+  const ticks = fixedTicks ?? niceTicks(Math.min(...all), Math.max(...all))
+  const label = format ?? ((v) => compactMoney(v, currency))
   const lo = ticks[0]
   const hi = ticks.at(-1)
   const n = labels.length
@@ -650,7 +909,8 @@ function lineChart({ currency, labels, series, tip, describe }) {
   let picked = null
 
   const x = (i) => PAD.l + (i * (width - PAD.l - PAD.r)) / (n - 1)
-  const y = (v) => PAD.t + ((hi - v) * (H - PAD.t - PAD.b)) / (hi - lo || 1)
+  // invert puts the smallest value at the top: rank #1 is the high point of a rank chart.
+  const y = (v) => PAD.t + ((invert ? v - lo : hi - v) * (H - PAD.t - PAD.b)) / (hi - lo || 1)
   const node = (tag, attrs) => {
     const e = document.createElementNS(SVG, tag)
     for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v)
@@ -662,18 +922,18 @@ function lineChart({ currency, labels, series, tip, describe }) {
     while (svg.firstChild) svg.removeChild(svg.firstChild)
     svg.setAttribute('viewBox', `0 0 ${width} ${H}`)
     for (const t of ticks) {
-      node('line', { x1: PAD.l, x2: width - PAD.r, y1: y(t), y2: y(t), class: t === 0 ? 'chart-zero' : 'chart-grid' })
-      node('text', { x: PAD.l - 6, y: y(t) + 4, class: 'chart-axis', 'text-anchor': 'end' }).textContent = compactMoney(t, currency)
+      node('line', { x1: PAD.l, x2: width - PAD.r, y1: y(t), y2: y(t), class: t === 0 && !fixedTicks ? 'chart-zero' : 'chart-grid' })
+      node('text', { x: PAD.l - 6, y: y(t) + 4, class: 'chart-axis', 'text-anchor': 'end' }).textContent = label(t)
     }
     // At most five date labels, evenly spread, always the first and the last.
     const every = Math.max(1, Math.ceil((n - 1) / 4))
     labels.forEach((label, i) => {
-      if (i !== n - 1 && (i % every !== 0 || n - 1 - i < every / 2)) return
+      if (i !== n - 1 && (i % every !== 0 || n - 1 - i <= every / 2)) return
       node('text', { x: x(i), y: H - 6, class: 'chart-axis', 'text-anchor': i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle' }).textContent = label
     })
     for (const s of series) {
       const pts = s.values.map((v, i) => [x(i), y(v)])
-      if (series.length === 1) {
+      if (series.length === 1 && area) {
         node('path', { d: `${smooth(pts)} L${x(n - 1)},${y(0)} L${x(0)},${y(0)} Z`, class: `chart-area chart-${s.tone}` })
       }
       node('path', { d: smooth(pts), class: `chart-line chart-${s.tone}` })

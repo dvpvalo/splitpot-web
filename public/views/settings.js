@@ -10,13 +10,13 @@ import {
   clockEnabled, dealerEnabled, levelMinutes, setClockEnabled, setDealerEnabled, setLevelMinutes,
 } from '../lib/tools.js'
 import { THEMES, apply as applyTheme, current as currentTheme } from '../theme.js'
-import { button, clear, clearBanner, el, mount, showError, showNotice } from '../ui.js'
+import { button, clear, clearBanner, el, mount, screenTitle, showError, showNotice } from '../ui.js'
 
 const CURRENCIES = ['GBP', 'INR', 'USD', 'EUR', 'AUD', 'CAD', 'JPY', 'ZAR']
 
 export function settingsView() {
   const root = el('main', 'screen')
-  root.appendChild(el('h1', 'title', 'Settings'))
+  root.appendChild(screenTitle('Host', 'Settings'))
   const body = el('div', 'stack')
   root.appendChild(body)
 
@@ -215,8 +215,9 @@ function lookCard() {
   return mount(wrap,
     el('h2', 'section-label', 'Look'),
     el('p', 'muted small',
-      'System follows your device. The button at the top of the screen cycles the other four.'),
+      'The button at the top of the screen cycles through these too.'),
     row,
+    button('Watch the intro again', () => { location.hash = '#/intro' }, 'btn-link'),
   )
 }
 

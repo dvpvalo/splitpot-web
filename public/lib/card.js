@@ -37,7 +37,7 @@ export async function settlementCard(game, transfers, players, potCents) {
   c.fillStyle = INK.felt
   c.fillRect(0, 0, W, canvas.height)
 
-  splitChip(c, W - PAD - 52, PAD + 52, 52)
+  await drawMark(c, W - PAD - 104, PAD, 104)
 
   c.textBaseline = 'alphabetic'
   c.fillStyle = INK.bone
@@ -78,39 +78,17 @@ export async function settlementCard(game, transfers, players, potCents) {
   return canvas
 }
 
-/** The launcher mark: two half-discs with brass rims and bone faces, pulled apart on a tilt. */
-function splitChip(c, cx, cy, r) {
+/** The Splitpot mark (icon.svg, written by tools/logo.py) on a rounded tile. A mark that fails
+ * to load is left off rather than holding up the share. */
+async function drawMark(c, x, y, size) {
+  const img = new Image()
+  img.src = new URL('../icon.svg', import.meta.url).href
+  try { await img.decode() } catch { return }
   c.save()
-  c.translate(cx, cy)
-  c.rotate((-28 * Math.PI) / 180)
-  const gap = r * 0.16
-  const rad = (d) => (d * Math.PI) / 180
-  for (const [side, start, notches] of [[-1, 90, [220, 270, 320]], [1, 270, [40, 90, 140]]]) {
-    const dx = side * gap
-    c.beginPath()
-    c.moveTo(dx, 0)
-    c.arc(dx, 0, r, rad(start), rad(start + 180))
-    c.closePath()
-    c.fillStyle = INK.bone
-    c.fill()
-    c.beginPath()
-    c.arc(dx, 0, r, rad(start), rad(start + 180))
-    c.lineWidth = r * 0.22
-    c.strokeStyle = INK.brass
-    c.stroke()
-    c.strokeStyle = INK.felt
-    c.lineWidth = r * 0.2
-    for (const a of notches) {
-      c.save()
-      c.translate(dx, 0)
-      c.rotate(rad(a))
-      c.beginPath()
-      c.moveTo(0, -r * 1.06)
-      c.lineTo(0, -r * 0.74)
-      c.stroke()
-      c.restore()
-    }
-  }
+  c.beginPath()
+  c.roundRect(x, y, size, size, size * 0.22)
+  c.clip()
+  c.drawImage(img, x, y, size, size)
   c.restore()
 }
 

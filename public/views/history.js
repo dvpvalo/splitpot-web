@@ -3,11 +3,11 @@
 import { hostStats } from '../db.js'
 import { formatMoney } from '../lib/money.js'
 import { shortDate } from '../lib/time.js'
-import { clear, el, money, mount, showError } from '../ui.js'
+import { clear, el, money, mount, screenTitle, showError } from '../ui.js'
 
 export function historyView() {
   const root = el('main', 'screen')
-  root.appendChild(el('h1', 'title', 'History'))
+  root.appendChild(screenTitle('Your games', 'History'))
   const body = el('div', 'stack')
   root.appendChild(body)
 

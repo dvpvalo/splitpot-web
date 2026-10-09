@@ -118,3 +118,8 @@ export function clearBanner() {
   clear(bar)
   bar.hidden = true
 }
+
+/** A screen's heading: a small capitalised label over a serif title. */
+export function screenTitle(eyebrow, title) {
+  return mount(el('header', 'screen-title'), el('p', 'eyebrow', eyebrow), el('h1', 'title', title))
+}

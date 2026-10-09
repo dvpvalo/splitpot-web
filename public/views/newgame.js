@@ -6,13 +6,13 @@
 import { createGame, profile } from '../db.js'
 import { formatAmount, formatMoney, parseMoney } from '../lib/money.js'
 import { MAX, load as loadPresets, remove, save as savePresets, upsert } from '../lib/presets.js'
-import { button, clear, clearBanner, el, mount, showError } from '../ui.js'
+import { button, clear, clearBanner, el, mount, screenTitle, showError } from '../ui.js'
 
 const CURRENCIES = ['GBP', 'INR', 'USD', 'EUR', 'AUD', 'CAD', 'JPY', 'ZAR']
 
 export function newGameView() {
   const root = el('main', 'screen')
-  mount(root, el('h1', 'title', 'Create a game'))
+  mount(root, screenTitle('Host a game', 'New game'))
 
   const chips = el('div', 'chips')
   const form = el('form', 'stack')
@@ -28,6 +28,16 @@ export function newGameView() {
   nameInput.className = 'field'
   nameInput.placeholder = 'Friday Night Cash Game'
   nameInput.required = true
+  // The first letter goes up as it is typed, not just on save: "maithil" was reaching History
+  // lower-case. The attribute asks a phone keyboard to do it; the listener covers a laptop.
+  nameInput.autocapitalize = 'sentences'
+  nameInput.addEventListener('input', () => {
+    const fixed = capitalizeFirst(nameInput.value)
+    if (fixed === nameInput.value) return
+    const { selectionStart, selectionEnd } = nameInput
+    nameInput.value = fixed
+    nameInput.setSelectionRange(selectionStart, selectionEnd)
+  })
 
   const dateInput = el('input')
   dateInput.className = 'field'
@@ -128,7 +138,7 @@ export function newGameView() {
     clearBanner()
 
     const currency = currencySelect.value
-    const name = nameInput.value.trim()
+    const name = capitalizeFirst(nameInput.value.trim())
     if (!name) return
 
     // Blank is allowed (a game with no stakes recorded); junk is not.
@@ -178,4 +188,9 @@ export function newGameView() {
   }
 
   return root
+}
+
+/** "friday game" -> "Friday game". Only the first letter; the rest is left as typed. */
+export function capitalizeFirst(s) {
+  return s ? s.charAt(0).toLocaleUpperCase() + s.slice(1) : s
 }

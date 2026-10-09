@@ -5,11 +5,11 @@
 import { hostStats, pendingSettlements } from '../db.js'
 import { longDate } from '../lib/time.js'
 import { formatMoney } from '../lib/money.js'
-import { clear, el, money, mount, showError } from '../ui.js'
+import { clear, el, money, mount, screenTitle, showError } from '../ui.js'
 
 export function homeView() {
   const root = el('main', 'screen')
-  root.appendChild(el('h1', 'title', 'Splitpot'))
+  root.appendChild(screenTitle('Splitpot', greeting(new Date().getHours())))
   const body = el('div', 'stack')
   root.appendChild(body)
 
@@ -45,6 +45,14 @@ export function homeView() {
 }
 
 const sectionLabel = (text) => el('h2', 'section-label', text)
+
+/** The title on Home: said the way you would say it, by the clock on the host's phone. */
+export function greeting(hour) {
+  if (hour < 5) return 'Late one tonight'
+  if (hour < 12) return 'Good morning'
+  if (hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
 
 function liveCard(g) {
   const card = el('a', 'card card-live')

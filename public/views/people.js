@@ -5,7 +5,7 @@ import { addPlayer, deletePlayer, hostStats, playerGameCount, players, updatePla
 import { formatMoney } from '../lib/money.js'
 import { recordsFor, seasonsIn, standingsFor, streakLabel } from '../lib/stats.js'
 import { shortDate } from '../lib/time.js'
-import { button, clear, clearBanner, el, money, monogram, mount, sheet, showError } from '../ui.js'
+import { button, clear, clearBanner, el, money, monogram, mount, screenTitle, sheet, showError } from '../ui.js'
 
 /**
  * The faces on offer. Deliberately a short fixed list rather than the emoji keyboard: a
@@ -32,7 +32,7 @@ const typeLabel = (wire) => PAYMENT_TYPES.find(([w]) => w === wire)?.[1] ?? 'Non
 
 export function peopleView() {
   const root = el('main', 'screen screen-wide')
-  root.appendChild(el('h1', 'title', 'People'))
+  root.appendChild(screenTitle('Your table', 'People'))
   // Two lists that answer different questions - how everyone is doing, and who is in the
   // book. They sit side by side once there is room and stack when there is not.
   const body = el('div', 'stack split')

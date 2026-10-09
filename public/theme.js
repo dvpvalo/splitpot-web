@@ -1,4 +1,5 @@
-// The five looks, mirroring ThemePref on the phone.
+// The three looks, mirroring ThemePref on the phone. Midnight, Daylight and System were
+// dropped on 7 Oct 2026 at the user's request; a saved choice of any of them reads as Lounge.
 //
 // The palettes themselves are custom properties in app.css; this file only decides which
 // block is live and remembers the choice. Money colours (--up/--down/--flat) are their own
@@ -9,20 +10,18 @@
 const KEY = 'splitpot_theme'
 
 export const THEMES = [
-  { key: 'system', label: 'System' },
-  { key: 'midnight', label: 'Midnight' },
-  { key: 'daylight', label: 'Daylight' },
+  { key: 'lounge', label: 'Lounge' },
   { key: 'felt', label: 'Neon felt' },
   { key: 'paper', label: 'Paper' },
 ]
 
-/** The top-bar cycle skips System: it is a preference, not a look to flip through. */
-const CYCLE = ['midnight', 'daylight', 'felt', 'paper']
+/** The order the top-bar button steps through. */
+const CYCLE = ['lounge', 'felt', 'paper']
 
 const valid = (key) => THEMES.some((t) => t.key === key)
 
-/** What a first visit gets: the card room, same as the phone's default. */
-const DEFAULT = 'felt'
+/** What a first visit gets: Lounge, same as the phone's default. */
+const DEFAULT = 'lounge'
 
 export function current() {
   try {
@@ -53,10 +52,10 @@ export function apply(key) {
   return theme
 }
 
-/** What one tap on the top-bar button moves to. From System, start at the beginning. */
+/** What one tap on the top-bar button moves to. Anything unknown starts at the beginning. */
 export function next(key = current()) {
   const at = CYCLE.indexOf(key)
   return at === -1 ? CYCLE[0] : CYCLE[(at + 1) % CYCLE.length]
 }
 
-export const labelOf = (key) => THEMES.find((t) => t.key === key)?.label ?? 'System'
+export const labelOf = (key) => THEMES.find((t) => t.key === key)?.label ?? 'Lounge'

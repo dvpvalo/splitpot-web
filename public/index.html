@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="felt">
+<html lang="en" data-theme="lounge">
 <head>
 <meta charset="utf-8">
 <!-- Without this a mobile browser renders at 980px and scales down: the single line that
@@ -11,15 +11,17 @@
 <!-- Relative, never root-relative, so the folder stays portable between hosts. -->
 <link rel="stylesheet" href="app.css">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="icon" href="icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="icon-192.png">
 <!-- Inline and before the stylesheet renders anything, so a host who chose Paper does not
-     get a flash of Midnight on every cold start. The module that owns themes loads with the
+     get a flash of Lounge on every cold start. The module that owns themes loads with the
      rest of the app, which is far too late for this one line. -->
 <script>
   try {
     var t = localStorage.getItem('splitpot_theme')
-    if (t) document.documentElement.dataset.theme = t
+    // Only the looks that still exist; an old Midnight/Daylight/System choice stays Lounge.
+    if (t === 'felt' || t === 'paper') document.documentElement.dataset.theme = t
   } catch (e) { /* private mode: the default look is a fine fallback */ }
 </script>
 <!-- Vendored UMD build: defines the `supabase` global. Must load before any module that

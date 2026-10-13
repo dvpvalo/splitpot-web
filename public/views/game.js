@@ -5,24 +5,28 @@
 // banner naming the player and the amount, with Retry; it never fails quietly.
 
 import {
-  addEntry, deleteEntry, deleteGame, finishGame, gameChanges, gameDetail, players,
-  reopenGame, seatPlayer, setSettlementPaid, standingsOf,
+  addEntry, decideRequest, deleteEntry, deleteGame, finishGame, gameChanges, gameDetail, players,
+  reopenGame, seatPlayer, setSettlementPaid, shuffleSeats, standingsOf,
 } from '../db.js'
 import {
   advanced, blindsAtLevel, clockLabel, isPaused, newClock, nextLevel,
   paused as pauseClock, remaining, resumed,
 } from '../lib/clock.js'
-import { formatMoney, settle } from '../lib/money.js'
+import { UPI_ENABLED, formatMoney, settle, upiIdOf, upiLink } from '../lib/money.js'
 import {
   clock as storedClock, clockEnabled, dealer as storedDealer, dealerEnabled, forgetGame,
   levelMinutes, saveClock, setDealer,
 } from '../lib/tools.js'
 import { durationLabel, longDate, parseInstant, relativeLabel } from '../lib/time.js'
 import {
-  button, clear, clearBanner, el, money, monogram, mount, sheet, showError, showNotice, showUndo,
+  button, clear, clearBanner, el, money, monogram, mount, payLink, sheet, showError, showNotice,
+  showUndo,
 } from '../ui.js'
-import { ledgerMessage, ledgerUrl } from '../lib/share.js'
-import { SEAT_H, SEAT_W, rackEdges, seatName, tableLayout } from '../lib/table.js'
+import { joinHint, ledgerMessage, ledgerUrl } from '../lib/share.js'
+import qrcode from '../vendor/qrcode.js'
+import {
+  SEAT_H, SEAT_W, rackEdges, seatName, shuffled, stackCheck, stackVerdict, tableLayout,
+} from '../lib/table.js'
 import { settlementCard } from '../lib/card.js'
 import { playerSheet } from './playersheet.js'
 
@@ -56,6 +60,7 @@ export function gameView(gameId) {
       mount(body,
         header(detail),
         clockCard && detail.game.status === 'live' ? clockCard : null,
+        requestsSection(detail, () => load(true)),
         seatSection(detail, () => load(true), ui),
         settlementSection(detail, () => load(true)),
         actionsSection(detail, () => load(true)),
@@ -141,6 +146,99 @@ function meter(detail) {
 }
 
 /**
+ * What players asked for from the ledger page: rebuys, and their stack counts at the end.
+ * Nothing here is money until the host taps Approve, and each approve is one server call that
+ * writes the entry and closes the ask together. Off means absent: no asks, no pixels.
+ */
+function requestsSection(detail, reload) {
+  const pending = detail.requests ?? []
+  if (detail.game.status !== 'live' || pending.length === 0) return null
+  const cur = detail.game.currency
+  const seatOf = new Map(detail.seats.map((s) => [s.gamePlayerId, s]))
+  const nameOf = (r) => seatName(seatOf.get(r.game_player_id)?.player.name ?? 'Player')
+  const wrap = el('div', 'stack-tight')
+
+  const rebuys = pending.filter((r) => r.kind === 'buyin')
+  if (rebuys.length) {
+    const card = el('section', 'card requests')
+    card.appendChild(el('h3', 'section-label', 'Asked from the ledger'))
+    for (const r of rebuys) {
+      card.appendChild(requestRow(r, `${nameOf(r)} · Rebuy ${formatMoney(r.amount_cents, cur)}`, reload))
+    }
+    wrap.appendChild(card)
+  }
+
+  const asked = pending.filter((r) => r.kind === 'cashout')
+  if (asked.length) {
+    const check = stackCheck(asked, detail.seats, detail.inPlayCents)
+    const card = el('section', 'card requests')
+    mount(card,
+      el('h3', 'section-label', 'Stack counts'),
+      el('p', 'row-title', `${check.counted} of ${check.of} counted`),
+      el('p', 'row-sub', `${formatMoney(check.countedCents, cur)} counted · `
+        + `${formatMoney(detail.inPlayCents, cur)} on the table`),
+      check.diffCents === null
+        ? el('p', 'row-sub', `Still to count: ${check.missing.map((s) => seatName(s.player.name)).join(', ')}`)
+        : el('p', `stack-verdict ${check.diffCents === 0 ? 'stack-ok' : 'stack-off'}`,
+          stackVerdict(check.diffCents, (c) => formatMoney(c, cur))),
+    )
+    for (const r of asked) {
+      card.appendChild(requestRow(r, `${nameOf(r)} · ${formatMoney(r.amount_cents, cur)}`, reload))
+    }
+    if (check.counts.length > 0) {
+      // Counts that do not add up are a warning, never a wall: hint, don't block.
+      const all = button('Log all cash-outs', async () => {
+        const ask = check.diffCents === null
+          ? `${check.of - check.counted} still to count. Log the ${check.counted} counted so far as cash-outs?`
+          : check.diffCents !== 0
+            ? `The counts are ${stackVerdict(check.diffCents, (c) => formatMoney(c, cur))}. Log them as cash-outs anyway?`
+            : `Log ${check.counted} cash-outs?`
+        if (!confirm(ask)) return
+        all.disabled = true
+        clearBanner()
+        const failed = []
+        for (const r of check.counts) {
+          try {
+            await decideRequest(r.id, true)
+          } catch (e) {
+            failed.push(`${nameOf(r)} (${e.message ?? e})`)
+          }
+        }
+        await reload()
+        if (failed.length) showError(`These cash-outs were NOT logged: ${failed.join(', ')}`)
+      }, 'btn btn-primary')
+      card.appendChild(all)
+    }
+    wrap.appendChild(card)
+  }
+  return wrap
+}
+
+/** One ask with Approve and Decline. Approve is a money write: a failure says so, loudly. */
+function requestRow(r, title, reload) {
+  const row = el('div', 'row request-row')
+  const main = el('div', 'row-main')
+  main.appendChild(el('h4', 'row-title', title))
+  const decide = async (yes) => {
+    approve.disabled = true
+    decline.disabled = true
+    clearBanner()
+    try {
+      await decideRequest(r.id, yes)
+      await reload()
+    } catch (e) {
+      approve.disabled = false
+      decline.disabled = false
+      showError(`${yes ? `${title} was NOT logged` : `Could not decline ${title}`}: ${e.message ?? e}`)
+    }
+  }
+  const approve = button('Approve', () => decide(true), 'btn-rebuy')
+  const decline = button('Decline', () => decide(false), 'btn-link')
+  mount(row, main, approve, decline)
+  return row
+}
+
+/**
  * The table and the timeline. One at a time on a phone, both at once from ~900px up.
  *
  * BOTH panels are always built and CSS decides which are shown - no JS breakpoint, and
@@ -216,7 +314,7 @@ function ovalTable(detail, reload, dealerSeatId) {
   }
   places.forEach((p) => table.appendChild(p))
 
-  const layout = (width) => {
+  const layout = (width, measured = true) => {
     const { height, a, b, seats } = tableLayout(places.length, width)
     table.style.height = `${height}px`
     Object.assign(felt.style, {
@@ -232,11 +330,13 @@ function ovalTable(detail, reload, dealerSeatId) {
     seats.forEach((pos, i) => {
       places[i].style.left = `${pos.x - SEAT_W / 2}px`
       places[i].style.top = `${pos.y - SEAT_H / 2}px`
+      const key = detail.seats[i]?.gamePlayerId
+      if (key && measured) slide(places[i], key, pos, width)
     })
   }
   // A phone-width guess so the first paint is already a table; the observer corrects it before
-  // the frame is drawn.
-  layout(358)
+  // the frame is drawn. The guess is not a real position, so nothing slides from it.
+  layout(358, false)
   const observer = new ResizeObserver(([entry]) => {
     // Every repaint builds a new table, so an observer on a detached one lets go of itself.
     if (!table.isConnected) { observer.disconnect(); return }
@@ -245,6 +345,31 @@ function ovalTable(detail, reload, dealerSeatId) {
   })
   observer.observe(table)
   return table
+}
+
+// Where each seat was last drawn, by gamePlayerId. Module-level because every repaint builds a
+// new table: a new seating (a Shuffle here, or from the phone) slides each seat over from where
+// it sat instead of jumping. Only at the same width - a resize is not a move.
+const lastSpot = new Map()
+const SLIDE_MS = 600
+
+function slide(node, key, to, width) {
+  const was = lastSpot.get(key)
+  const now = performance.now()
+  let from = null
+  let at = now
+  if (was && was.width === width) {
+    if (was.x !== to.x || was.y !== to.y) from = { x: was.x, y: was.y }
+    // The table was rebuilt mid-slide (the realtime echo of the shuffle): carry on, not restart.
+    else if (was.from && now - was.at < SLIDE_MS) { from = was.from; at = was.at }
+  }
+  lastSpot.set(key, { x: to.x, y: to.y, width, from, at })
+  if (!from || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const anim = node.animate(
+    [{ transform: `translate(${from.x - to.x}px, ${from.y - to.y}px)` }, { transform: 'none' }],
+    { duration: SLIDE_MS, easing: 'cubic-bezier(.2, .8, .2, 1)' },
+  )
+  anim.currentTime = now - at
 }
 
 function seatNode(seat, detail, reload, isDealer, edges) {
@@ -484,6 +609,7 @@ function settlementSection(detail, reload) {
     wrap.appendChild(el('p', 'muted', "Nothing to settle — everyone's square."))
   } else {
     const list = el('div', 'list tickets')
+    const playerOf = new Map(detail.seats.map((s) => [s.player.id, s.player]))
     for (const r of rows) {
       const row = el('div', 'row')
       const main = el('div', 'row-main')
@@ -492,6 +618,11 @@ function settlementSection(detail, reload) {
       const right = el('div', 'row-right')
       right.appendChild(el('span', `money money-${r.paid ? 'flat' : 'down'}`,
         formatMoney(r.amountCents, detail.game.currency)))
+      const pay = UPI_ENABLED && !r.paid && upiLink({
+        upiId: upiIdOf(playerOf.get(r.toId)), name: r.toName, cents: r.amountCents,
+        currency: detail.game.currency, note: `Splitpot: ${detail.game.name}`,
+      })
+      if (pay) right.appendChild(payLink(pay))
       // Only a stored row can be ticked; a live preview has no row to tick yet.
       if (r.id) right.appendChild(paidToggle(r, reload))
       mount(row, main, right)
@@ -557,6 +688,7 @@ function storedRows(detail) {
     .sort((a, b) => b.amount_cents - a.amount_cents)
     .map((s) => ({
       id: s.id,
+      toId: s.to_player_id,
       fromName: nameOf.get(s.from_player_id) ?? 'Removed player',
       toName: nameOf.get(s.to_player_id) ?? 'Removed player',
       amountCents: s.amount_cents,
@@ -615,6 +747,24 @@ function actionsSection(detail, reload) {
       }
     }, 'btn btn-primary')
     wrap.appendChild(finish)
+
+    if (game.ledger_slug) wrap.appendChild(button('Show join QR', () => joinSheet(game), 'btn'))
+
+    // Who sits where, drawn fairly. One write for the whole table; seats are not queued offline.
+    if (detail.seats.length >= 3) {
+      const shuffle = button('Shuffle seats', async () => {
+        shuffle.disabled = true
+        clearBanner()
+        try {
+          await shuffleSeats(game.id, shuffled(detail.seats))
+          await reload()
+        } catch (e) {
+          shuffle.disabled = false
+          showError(`Seats were NOT shuffled: ${navigator.onLine ? (e.message ?? e) : 'no signal.'}`)
+        }
+      }, 'btn')
+      wrap.appendChild(shuffle)
+    }
   } else {
     const reopen = button('Reopen this game', async () => {
       const note = paidCount > 0
@@ -670,6 +820,30 @@ function actionsSection(detail, reload) {
   wrap.appendChild(del)
 
   return wrap
+}
+
+/**
+ * The QR players scan to open the live ledger, and the short code for anyone who would rather
+ * type. Dark on white whatever the theme: a camera needs the contrast.
+ */
+function joinSheet(game) {
+  const qr = qrcode(0, 'M')
+  qr.addData(ledgerUrl({ ledgerSlug: game.ledger_slug }))
+  qr.make()
+  const n = qr.getModuleCount()
+  let d = ''
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + 4} ${r + 4}h1v1h-1z`
+  const art = el('div', 'join-qr')
+  art.setAttribute('role', 'img')
+  art.setAttribute('aria-label', 'QR code for the live ledger')
+  // Only numbers go into this markup.
+  art.innerHTML = `<svg viewBox="0 0 ${n + 8} ${n + 8}" shape-rendering="crispEdges">`
+    + `<rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="${d}"/></svg>`
+  const body = el('div', 'sheet-body join')
+  mount(body, art,
+    game.join_code ? el('p', 'join-code', game.join_code) : null,
+    el('p', 'muted', joinHint(game.join_code)))
+  sheet('Players join here', body)
 }
 
 /**

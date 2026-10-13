@@ -109,3 +109,47 @@ export function seatName(name) {
   const parts = name.trim().split(/\s+/)
   return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0]
 }
+
+/**
+ * A fair new seating: Fisher-Yates over `rand` (0 <= r < 1). Never hands back the order it was
+ * given - a Shuffle tap that moves nobody reads as broken - so with two or more seats it draws
+ * again until something moves.
+ */
+export function shuffled(items, rand = secureRandom) {
+  for (;;) {
+    const out = [...items]
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1))
+      ;[out[i], out[j]] = [out[j], out[i]]
+    }
+    if (items.length < 2 || out.some((x, i) => x !== items[i])) return out
+  }
+}
+
+const secureRandom = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32
+
+/**
+ * Everyone's stack count against what is on the table. `counts` are the pending cash-out asks
+ * from the ledger page; a seat that has already cashed out is not on the table, so its count
+ * (if any) is left out. `diffCents` is null until every open seat has counted: positive means
+ * the chips come to more than went in, negative less.
+ */
+export function stackCheck(counts, seats, inPlayCents) {
+  const open = seats.filter((s) => !s.hasCashedOut)
+  const ids = new Set(open.map((s) => s.gamePlayerId))
+  const valid = counts.filter((c) => ids.has(c.game_player_id))
+  const done = new Set(valid.map((c) => c.game_player_id))
+  const countedCents = valid.reduce((sum, c) => sum + c.amount_cents, 0)
+  return {
+    counts: valid,
+    counted: done.size,
+    of: open.length,
+    countedCents,
+    missing: open.filter((s) => !done.has(s.gamePlayerId)),
+    diffCents: done.size === open.length ? countedCents - inPlayCents : null,
+  }
+}
+
+/** "Adds up ✓", "₹200 short" or "₹200 over". */
+export const stackVerdict = (diffCents, format) => (diffCents === 0 ? 'Adds up ✓'
+  : diffCents < 0 ? `${format(-diffCents)} short` : `${format(diffCents)} over`)

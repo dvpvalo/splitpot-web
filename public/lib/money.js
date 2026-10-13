@@ -135,3 +135,80 @@ export function settle(standings) {
   }
   return transfers
 }
+
+/**
+ * UPI is built but held back until after launch (user, 12 Oct 2026: people pay each other
+ * themselves for now). Off hides the UPI payment type, every Pay button and the intro's pay
+ * scenes. Flip it here and in money/Settlement.kt to bring all of it back.
+ */
+export const UPI_ENABLED = false
+
+/**
+ * A UPI id ("name@bank"). Checked before it goes into a link, because the id travels raw:
+ * some UPI apps refuse a percent-encoded "@", so the id is never encoded, only vetted.
+ */
+export const isUpiId = (s) => /^[A-Za-z0-9._-]{2,256}@[A-Za-z][A-Za-z0-9.-]{1,63}$/.test((s ?? '').trim())
+
+/**
+ * The upi:// link that opens GPay / PhonePe / Paytm with the payee and amount filled in.
+ * Null unless the payee has a UPI id and the game is in rupees - UPI moves nothing else.
+ */
+export function upiLink({ upiId, name, cents, currency, note }) {
+  if (currency !== 'INR' || !isUpiId(upiId) || !(cents > 0)) return null
+  const am = `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}`
+  return `upi://pay?pa=${upiId.trim()}&pn=${encodeURIComponent(name)}&am=${am}&cu=INR`
+    + (note ? `&tn=${encodeURIComponent(note.slice(0, 50))}` : '')
+}
+
+/** The player's UPI id, or null. A player row from the database or the ledger. */
+export const upiIdOf = (p) => (p?.payment_type === 'upi' && isUpiId(p.payment_details)
+  ? p.payment_details.trim() : null)
+
+/**
+ * Everything still owed across every finished game, squared up in as few payments as it can.
+ * `rows` are pending settlements in ONE currency: {id, fromId, fromName, toId, toName,
+ * amountCents}.
+ *
+ * Two ways to square it, and the fewer payments wins:
+ *  - pairwise: two people who owe each other from different nights pay once, the difference.
+ *    Nobody ends up paying someone they never owed, and each payment maps back to its rows,
+ *    so it can be ticked on its own (`ids`).
+ *  - simplified: everyone's total, run through settle(). Can save more payments, but may
+ *    have Tanish pay someone he never sat with, and a payment no longer maps to rows
+ *    (`ids` null): only "everyone's paid" can clear it.
+ * A pair that cancels out exactly is kept as a 0 row, so its debts can still be cleared.
+ */
+export function settleAcross(rows) {
+  const pairs = new Map()
+  for (const r of rows) {
+    const from = { id: r.fromId, name: r.fromName }
+    const to = { id: r.toId, name: r.toName }
+    const forward = from.id < to.id
+    const [lo, hi] = forward ? [from, to] : [to, from]
+    const key = `${lo.id}|${hi.id}`
+    const p = pairs.get(key) ?? { lo, hi, net: 0, ids: [] }
+    p.net += forward ? r.amountCents : -r.amountCents // lo owes hi when net > 0
+    p.ids.push(r.id)
+    pairs.set(key, p)
+  }
+  const byAmount = (x, y) => y.amountCents - x.amountCents
+    || (x.fromId < y.fromId ? -1 : x.fromId > y.fromId ? 1 : 0)
+    || (x.toId < y.toId ? -1 : x.toId > y.toId ? 1 : 0)
+  const pairwise = [...pairs.values()].map(({ lo, hi, net, ids }) => {
+    const [from, to] = net >= 0 ? [lo, hi] : [hi, lo]
+    return { fromId: from.id, fromName: from.name, toId: to.id, toName: to.name,
+      amountCents: Math.abs(net), ids }
+  }).sort(byAmount)
+
+  const nets = new Map()
+  for (const r of rows) {
+    nets.set(r.fromId, { name: r.fromName, net: (nets.get(r.fromId)?.net ?? 0) - r.amountCents })
+    nets.set(r.toId, { name: r.toName, net: (nets.get(r.toId)?.net ?? 0) + r.amountCents })
+  }
+  const simplified = settle([...nets].map(([playerId, v]) => ({ playerId, name: v.name, netCents: v.net })))
+
+  const paying = pairwise.filter((p) => p.amountCents > 0).length
+  return simplified.length < paying
+    ? { payments: simplified.map((t) => ({ ...t, ids: null })), simplified: true, debts: rows.length }
+    : { payments: pairwise, simplified: false, debts: rows.length }
+}

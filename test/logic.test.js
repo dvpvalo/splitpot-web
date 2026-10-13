@@ -15,7 +15,7 @@ import { MAX, parsePresets, remove, upsert } from '../public/lib/presets.js'
 import {
   durationLabel, longDate, parseInstant, relativeLabel, shortDate,
 } from '../public/lib/time.js'
-import { historyUrl, resultsMessage } from '../public/lib/share.js'
+import { historyUrl, joinHint, playerCardMessage, resultsMessage } from '../public/lib/share.js'
 
 const s = (name, net) => ({ playerId: name, name, netCents: net })
 
@@ -503,7 +503,9 @@ test('the results message is the one people paste into WhatsApp', () => {
 })
 
 // ---------- the oval table ----------
-import { RACK_MAX, SEAT_H, SEAT_W, pileLabel, rackEdges, seatName, tableLayout } from '../public/lib/table.js'
+import {
+  RACK_MAX, SEAT_H, SEAT_W, pileLabel, rackEdges, seatName, shuffled, stackCheck, stackVerdict, tableLayout,
+} from '../public/lib/table.js'
 
 test('seats never overlap, from an empty table to a full one, phone to desktop', () => {
   for (const width of [343, 358, 560, 640]) {
@@ -761,8 +763,14 @@ test('intro demo: buy-ins arrive one seat at a time, then the rebuy, then result
   assert.equal(over.centre, 'over')
   assert.deepEqual(over.tags.map((t) => t.kind), ['up', 'down', 'up', 'flat'])
   assert.equal(over.tags.reduce((s, t) => s + t.cents, 0), 0, 'the demo night sums to zero')
-  assert.ok(demoAt(8).arrows && !demoAt(8).standings)
-  assert.ok(demoAt(9).standings)
+  assert.ok(demoAt(8).arrows && !demoAt(8).standings && demoAt(8).pay === null)
+  // UPI held back (UPI_ENABLED false): straight from the arrows to the standings.
+  assert.ok(demoAt(9).standings && demoAt(9).pay === null)
+  // With UPI on, the Pay button and the tick come first.
+  assert.deepEqual([demoAt(9, true).pay, demoAt(10, true).pay, demoAt(11, true).pay], ['ask', 'paid', null])
+  assert.ok(!demoAt(10, true).standings && demoAt(11, true).standings)
+  assert.equal(demoAt(9, true).caption, 'Tap Pay: UPI opens with the amount filled in')
+  assert.equal(demoAt(9).caption, 'Every night adds to your standings')
 })
 
 test('intro demo: the settle-ups are what settle() really asks for', async () => {
@@ -773,11 +781,16 @@ test('intro demo: the settle-ups are what settle() really asks for', async () =>
 })
 
 test('intro demo: the clock maps to beats and loops', async () => {
-  const { beatAt, DEMO_LOOP_MS } = await import('../public/lib/intro.js')
+  const { beatAt, demoBeats } = await import('../public/lib/intro.js')
+  const DEMO_LOOP_MS = demoBeats(false).loop
   assert.equal(beatAt(0), 0)
   assert.equal(beatAt(650), 1)
   assert.equal(beatAt(5600), 7)
   assert.equal(beatAt(12000), 9)
+  assert.equal(beatAt(10000, true), 9)
+  assert.equal(beatAt(12000, true), 10)
+  assert.equal(beatAt(13000, true), 11)
+  assert.equal(demoBeats(true).loop, 16500)
   assert.equal(beatAt(DEMO_LOOP_MS + 650), 1)
 })
 
@@ -885,4 +898,187 @@ test('insights 3: attendance, group totals and the head-to-head grid', async () 
   assert.deepEqual(g.cells[1][0], { together: 3, ahead: 2, behind: 1 })
   assert.equal(g.cells[0][0], null)
   assert.equal(g.more, 1)
+})
+
+test('upi: links only for a real id in rupees, amount always two places', async () => {
+  const { isUpiId, upiLink, upiIdOf } = await import('../public/lib/money.js')
+  assert.ok(isUpiId('yash.mour@okhdfcbank'))
+  assert.ok(isUpiId(' 9876543210@ybl '))
+  for (const bad of ['', 'yash', '@ybl', 'yash@', 'ya sh@ybl', 'yash@1bank', null]) assert.ok(!isUpiId(bad), String(bad))
+  assert.equal(
+    upiLink({ upiId: 'yash@ybl', name: 'Yash Mour', cents: 2400, currency: 'INR', note: 'Splitpot: Taniyaaa' }),
+    'upi://pay?pa=yash@ybl&pn=Yash%20Mour&am=24.00&cu=INR&tn=Splitpot%3A%20Taniyaaa')
+  assert.equal(upiLink({ upiId: 'yash@ybl', name: 'Y', cents: 105, currency: 'INR' }), 'upi://pay?pa=yash@ybl&pn=Y&am=1.05&cu=INR')
+  assert.equal(upiLink({ upiId: 'yash@ybl', name: 'Y', cents: 2400, currency: 'GBP' }), null)
+  assert.equal(upiLink({ upiId: 'yash@ybl', name: 'Y', cents: 0, currency: 'INR' }), null)
+  assert.equal(upiIdOf({ payment_type: 'upi', payment_details: ' yash@ybl ' }), 'yash@ybl')
+  assert.equal(upiIdOf({ payment_type: 'bank', payment_details: 'yash@ybl' }), null)
+})
+
+test('settle across games: the host’s real nine debts', async () => {
+  const { settleAcross } = await import('../public/lib/money.js')
+  const r = (id, from, to, cents) => ({ id, fromId: from, fromName: from, toId: to, toName: to, amountCents: cents })
+  // Every pending settlement on 9 Oct 2026, three games.
+  const rows = [
+    r(1, 'vir', 'Krishit', 7500), r(2, 'vir', 'Darsh', 67500), r(3, 'Maithil', 'Darsh', 150000),
+    r(4, 'Soham', 'Darsh', 6900),
+    r(5, 'Vaibhav', 'Soham', 2700), r(6, 'Vaibhav', 'Yashraj', 7300), r(7, 'Tanish', 'Yash', 20000),
+    r(8, 'Darsh', 'Yash', 10700), r(9, 'Darsh', 'Soham', 9300),
+  ]
+  const s = settleAcross(rows)
+  // Simplifying would also take 8, but have Tanish pay three people - so pairwise wins the tie.
+  assert.equal(s.simplified, false)
+  assert.equal(s.debts, 9)
+  assert.equal(s.payments.length, 8)
+  const ds = s.payments.find((p) => p.fromId === 'Darsh' && p.toId === 'Soham')
+  assert.deepEqual([ds.amountCents, ds.ids.sort()], [2400, [4, 9]])
+  assert.equal(s.payments.flatMap((p) => p.ids).length, 9, 'every debt belongs to one payment')
+})
+
+test('settle across games: a chain collapses, a wash is kept to be cleared', async () => {
+  const { settleAcross } = await import('../public/lib/money.js')
+  const r = (id, from, to, cents) => ({ id, fromId: from, fromName: from, toId: to, toName: to, amountCents: cents })
+  const chain = settleAcross([r(1, 'a', 'b', 100), r(2, 'b', 'c', 100), r(3, 'c', 'd', 100)])
+  assert.equal(chain.simplified, true)
+  assert.deepEqual(chain.payments.map((p) => [p.fromId, p.toId, p.amountCents, p.ids]), [['a', 'd', 100, null]])
+  const wash = settleAcross([r(1, 'a', 'b', 500), r(2, 'b', 'a', 500)])
+  assert.deepEqual(wash.payments.map((p) => [p.amountCents, p.ids]), [[0, [1, 2]]])
+  assert.deepEqual(settleAcross([]).payments, [])
+})
+
+test('wrapped: every card for all time, worded as it is drawn', async () => {
+  const { wrappedFor } = await import('../public/lib/wrapped.js')
+  const cards = wrappedFor(group, 'INR', { label: 'All time', key: null })
+  assert.deepEqual(cards.map((c) => [c.key, c.title, c.big, c.name]), [
+    ['cover', 'The story so far', '5', 'games played'],
+    ['pot', 'The biggest night', '₹7', 'G3'],
+    ['win', 'Biggest single win', '+₹4', 'me'],
+    ['loss', 'Toughest night', '-₹3', 'me'], // tied with dan's G3: the older one keeps it
+    ['rebuy', 'Most likely to rebuy', '4', 'me'],
+    ['regular', 'The regular', '4/5', 'eve'],
+    ['podium', 'Top of the table', '', ''],
+    ['end', 'The all-time winner', '+₹4.50', 'me'],
+  ])
+  assert.deepEqual(cards[0].lines, ['3 players', '₹20 across the table', '₹11.50 changed hands'])
+  assert.deepEqual(cards[1].lines, ['8 Sep 2026', '3 players'])
+  assert.deepEqual(cards[3].lines, ['G2 · 3 Sep 2026'])
+  assert.deepEqual(cards[4].lines, ['rebuys across 2 games'])
+  assert.deepEqual(cards[5].lines, ['4 in a row and counting'])
+  assert.deepEqual(cards[6].rows, [
+    { rank: 1, name: 'me', value: '+₹4.50', tone: 'up' },
+    { rank: 2, name: 'dan', value: '-₹1', tone: 'down' },
+    { rank: 3, name: 'eve', value: '-₹3.50', tone: 'down' },
+  ])
+  assert.deepEqual(cards[7].lines, ["That's you. Take a bow.", 'See you at the table.'])
+})
+
+test('wrapped: one month, someone else on top, and nothing to wrap', async () => {
+  const { wrappedFor } = await import('../public/lib/wrapped.js')
+  const sep = wrappedFor(group, 'INR', { label: 'Sep 2026', key: '2026-09' })
+  assert.equal(sep[0].title, 'Sep 2026, wrapped')
+  const regular = sep.find((c) => c.key === 'regular')
+  assert.deepEqual([regular.title, regular.big, regular.name], ['Never missed a game', '3/3', 'dan'])
+  const oct = wrappedFor(group.filter((n) => n.playerId !== 'me'), 'INR', { label: 'Oct 2026', key: '2026-10' })
+  const end = oct.at(-1)
+  assert.deepEqual([end.title, end.name, end.lines], ['The winner of Oct 2026', 'dan', ['See you at the table.']])
+  assert.equal(oct.some((c) => c.key === 'rebuy'), true)
+  assert.equal(wrappedFor(group, 'GBP', { label: 'All time', key: null }), null)
+  const asEve = group.map((n) => ({ ...n, isSelf: n.playerId === 'eve' }))
+  const eve = wrappedFor(asEve, 'INR', { label: 'All time', key: null }).at(-1)
+  assert.deepEqual(eve.lines, ['You finished 3rd of 3, -₹3.50', 'See you at the table.'])
+})
+
+test('reminders: one night, two nights netted, and a simplified payment', async () => {
+  const { reminderMessage } = await import('../public/lib/share.js')
+  const gameOf = new Map([
+    ['s7', { gameName: 'taniyaaa', playedOn: '2026-10-08', ledgerSlug: 'f119abcdef' }],
+    ['s4', { gameName: 'tanish', playedOn: '2026-10-02', ledgerSlug: 'd2b2abcdef' }],
+    ['s9', { gameName: 'taniyaaa', playedOn: '2026-10-08', ledgerSlug: 'f119abcdef' }],
+  ])
+  assert.equal(
+    reminderMessage({ fromName: 'Tanish Mehta', toName: 'Yash Mour', amountCents: 20000, ids: ['s7'] }, gameOf, 'INR'),
+    'Hi Tanish, quick reminder from our poker nights: you still owe Yash Mour ₹200 (taniyaaa, 8 Oct).\n'
+    + 'Full ledger: https://dvpvalo.github.io/splitpot-ledger/?g=f119abcdef')
+  // The host's real pair: 93 owed on the 8th, 69 owed back on the 2nd, so 24 - newest ledger.
+  assert.equal(
+    reminderMessage({ fromName: 'Darsh', toName: 'Soham Agarwal', amountCents: 2400, ids: ['s9', 's4'] }, gameOf, 'INR'),
+    'Hi Darsh, quick reminder from our poker nights: you still owe Soham Agarwal ₹24 (tanish, 2 Oct and taniyaaa, 8 Oct).\n'
+    + 'Full ledger: https://dvpvalo.github.io/splitpot-ledger/?g=f119abcdef')
+  assert.equal(
+    reminderMessage({ fromName: 'a', toName: 'd', amountCents: 100, ids: null }, gameOf, 'INR'),
+    'Hi a, quick reminder from our poker nights: you still owe d ₹1 from our recent games.')
+})
+
+test('wrapped on Home: last calendar month, most-played currency, January wraps the year', async () => {
+  const { wrappedDue } = await import('../public/lib/wrapped.js')
+  assert.deepEqual(wrappedDue(group, '2026-10-12'), { season: { label: 'Sep 2026', key: '2026-09' }, currency: 'INR' })
+  assert.equal(wrappedDue(group, '2026-09-30'), null, 'nothing played in August')
+  const gbp = (id, on) => ({ ...group[0], gameId: id, playedOn: on, currency: 'GBP' })
+  const dec = [gbp('x', '2026-12-01'), gbp('y', '2026-12-05'), { ...group[0], gameId: 'z', playedOn: '2026-12-09' }]
+  assert.deepEqual(wrappedDue(dec, '2027-01-02'), { season: { label: 'Dec 2026', key: '2026-12' }, currency: 'GBP' })
+})
+
+test('invites: the time reads like a person wrote it, and the group message', async () => {
+  const { inviteMessage, inviteTime } = await import('../public/lib/share.js')
+  assert.equal(inviteTime(new Date(2026, 9, 16, 21, 0)), 'Fri 16 Oct, 9:00 pm')
+  assert.equal(inviteTime(new Date(2026, 9, 17, 0, 5)), 'Sat 17 Oct, 12:05 am')
+  assert.equal(inviteTime(new Date(2026, 9, 17, 12, 30)), 'Sat 17 Oct, 12:30 pm')
+  assert.equal(
+    inviteMessage({ title: 'Poker night', startsAt: new Date(2026, 9, 16, 21, 0), location: "Maithil's place", slug: 'abc123xyz' }),
+    "Poker night · Fri 16 Oct, 9:00 pm · Maithil's place\nIn or out? Tap your name: https://dvpvalo.github.io/splitpot-ledger/invite.html?i=abc123xyz")
+  assert.equal(
+    inviteMessage({ title: 'Poker night', startsAt: new Date(2026, 9, 16, 21, 0), location: null, slug: 's' }).split('\n')[0],
+    'Poker night · Fri 16 Oct, 9:00 pm')
+})
+
+test('shuffle seats: Fisher-Yates, same seats, never the order it started in', () => {
+  const seq = (...r) => { let i = 0; return () => r[i++ % r.length] }
+  assert.deepEqual(shuffled(['a', 'b', 'c', 'd'], seq(0)), ['b', 'c', 'd', 'a'])
+  // 0.999 picks j = i every time, which moves nobody: that draw is thrown away and redone.
+  assert.deepEqual(shuffled(['a', 'b', 'c', 'd'], seq(0.999, 0.999, 0.999, 0, 0, 0)), ['b', 'c', 'd', 'a'])
+  assert.deepEqual(shuffled(['solo']), ['solo'])
+  const out = shuffled([1, 2, 3, 4, 5, 6, 7, 8])
+  assert.deepEqual([...out].sort(), [1, 2, 3, 4, 5, 6, 7, 8])
+  assert.notDeepEqual(out, [1, 2, 3, 4, 5, 6, 7, 8])
+})
+
+test('join hint names the players page, or only the camera when the game has no code', () => {
+  assert.equal(joinHint('K7QMXR'), 'Scan with the camera, or open dvpvalo.github.io/splitpot-ledger and type the code.')
+  assert.equal(joinHint(null), 'Scan with the camera to open the live ledger.')
+})
+
+test('stack counts: counted against what is on the table, cashed-out seats left out', () => {
+  const seats = [
+    { gamePlayerId: 'a', hasCashedOut: false }, { gamePlayerId: 'b', hasCashedOut: false },
+    { gamePlayerId: 'c', hasCashedOut: true },
+  ]
+  const half = stackCheck([{ game_player_id: 'a', amount_cents: 90000 }, { game_player_id: 'c', amount_cents: 5000 }], seats, 150000)
+  assert.deepEqual([half.counted, half.of, half.countedCents, half.diffCents], [1, 2, 90000, null])
+  assert.deepEqual(half.missing.map((s) => s.gamePlayerId), ['b'])
+  assert.equal(half.counts.length, 1)
+  const all = stackCheck([{ game_player_id: 'a', amount_cents: 90000 }, { game_player_id: 'b', amount_cents: 40000 }], seats, 150000)
+  assert.deepEqual([all.counted, all.of, all.diffCents, all.missing.length], [2, 2, -20000, 0])
+  const f = (c) => `₹${c / 100}`
+  assert.equal(stackVerdict(all.diffCents, f), '₹200 short')
+  assert.equal(stackVerdict(3000, f), '₹30 over')
+  assert.equal(stackVerdict(0, f), 'Adds up ✓')
+})
+
+test('player card link lives on the app, so it can read the same insights code', () => {
+  assert.equal(playerCardMessage('Yash Mour', 'abc123xyz'), "Yash Mour's poker card\nhttps://splitpot.pages.dev/player.html?p=abc123xyz")
+})
+
+test('season race: running totals game by game, top first, one colour each all the way', async () => {
+  const { raceFrames, raceAt, raceDuration } = await import('../public/lib/insights.js')
+  const f = raceFrames(group, 'INR')
+  assert.deepEqual(f.map((x) => [x.gameId, x.index, x.of]), [['G1', 1, 5], ['G2', 2, 5], ['G3', 3, 5], ['G4', 4, 5], ['G5', 5, 5]])
+  assert.deepEqual(f.map((x) => x.rows.map((r) => `${r.playerId}${r.totalCents}`)), [
+    ['me200', 'dan-200'], ['dan100', 'eve0', 'me-100'], ['me300', 'eve-100', 'dan-200'],
+    ['me450', 'dan-200', 'eve-250'], ['me450', 'dan-100', 'eve-350'],
+  ])
+  assert.deepEqual(f[4].rows.map((r) => [r.playerId, r.colour]), [['me', 1], ['dan', 0], ['eve', 2]], 'dan sat down first by name, eve a game later')
+  const oct = raceFrames(group, 'INR', { key: '2026-10' })
+  assert.deepEqual(oct.map((x) => x.rows.map((r) => `${r.playerId}${r.totalCents}`)), [['me150', 'eve-150'], ['me150', 'dan100', 'eve-250']])
+  assert.deepEqual([raceAt(0, 5), raceAt(450, 5), raceAt(1000, 5), raceAt(1200, 5), raceAt(6100, 5)], [0, 0.5, 1, 1, 5])
+  assert.equal(raceDuration(5), 8000)
 })

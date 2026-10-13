@@ -39,6 +39,16 @@ export function mount(node, ...children) {
   return node
 }
 
+/**
+ * A UPI "Pay" button. A plain link, not a button: upi:// is the phone's to open, and it hands
+ * the payment to GPay / PhonePe / Paytm with the payee and amount already filled in.
+ */
+export function payLink(href, label = 'Pay') {
+  const a = el('a', 'btn-rebuy btn-pay', label)
+  a.href = href
+  return a
+}
+
 export function button(label, onClick, cls = 'btn') {
   const b = el('button', cls, label)
   b.type = 'button'

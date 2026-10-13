@@ -5,15 +5,17 @@
 //
 // A host with no finished games sees a clearly-marked sample instead of an empty page.
 
-import { hostStats, players } from '../db.js'
 import {
   BIG_TABLE, LONG_GAME_HOURS, attendanceFor, badgesFor, compactMoney, comparisonSeries, currenciesFor,
-  groupTotals, h2hGrid, hallOfFame, hoursLabel, insightsFor, niceTicks, rankHistory, rankTicks, rivalsFor,
-  sampleNights, trendBy,
+  groupTotals, h2hGrid, hallOfFame, hoursLabel, insightsFor, niceTicks, raceFrames, rankHistory, rankTicks,
+  rivalsFor, sampleNights, trendBy,
 } from '../lib/insights.js'
 import { formatMoney } from '../lib/money.js'
 import { seasonsIn, standingsFor } from '../lib/stats.js'
 import { shortDate } from '../lib/time.js'
+import { wrappedFor } from '../lib/wrapped.js'
+import { wrappedEntry } from './wrapped.js'
+import { raceEntry } from './race.js'
 import { button, clear, el, money, monogram, mount, sheet, showError } from '../ui.js'
 
 const SVG = 'http://www.w3.org/2000/svg'
@@ -68,6 +70,9 @@ export function insightsView() {
     clear(body)
     body.appendChild(el('p', 'muted', 'Loading…'))
     try {
+      // Imported here, not at the top, so the public player card (player.html) can draw these
+      // same sections without loading the signed-in database client.
+      const { hostStats, players } = await import('../db.js')
       const [stats, roster] = await Promise.all([hostStats(), players()])
       clear(body)
       mount(body, screen(stats.nights ?? [], roster))
@@ -134,8 +139,13 @@ function screen(realNights, roster) {
         (v) => { state.currency = v; draw() }))
     }
     wrap.appendChild(filters)
+    // Not on the sample: a story about made-up people is nothing to post in the group.
+    if (!sample) mount(wrap, insightsWrapped(nights, state.currency, season))
 
     if (standings) {
+      // The race needs a season to tell: two games at least, and real ones.
+      const frames = sample ? [] : raceFrames(nights, state.currency, season)
+      if (frames.length >= 2) wrap.appendChild(raceEntry(frames, season.key === null ? 'All time' : season.label, state.currency))
       mount(wrap, ...standingsTab(nights, state, season, personOf, draw))
       return
     }
@@ -146,14 +156,22 @@ function screen(realNights, roster) {
         (v) => { state.player = v; state.rivalsShown = 4; state.recentShown = 5; draw() }, 'select-plain'))
     wrap.appendChild(pick)
 
-    const r = insightsFor(nights, state.player, state.currency, season)
-    if (r.games === 0) {
-      wrap.appendChild(el('p', 'muted', 'No finished games in this period.'))
-      return
-    }
-    const cur = state.currency
-    const you = Boolean(counts.get(state.player)?.isSelf)
-    mount(wrap,
+    mount(wrap, ...playerSections(nights, state, season, personOf, draw, Boolean(counts.get(state.player)?.isSelf)))
+  }
+
+  draw()
+  return wrap
+}
+
+/**
+ * One player's Insights, every section in order. Also the whole of the public player card
+ * (player.html), so the card can never disagree with what the host sees here.
+ */
+export function playerSections(nights, state, season, personOf, draw, you) {
+  const r = insightsFor(nights, state.player, state.currency, season)
+  if (r.games === 0) return [el('p', 'muted', 'No finished games in this period.')]
+  const cur = state.currency
+  return [
       hero(r, cur, season.label, you),
       pair(
         tile('up', 'Biggest win', r.best && r.best.netCents > 0 ? money(r.best.netCents, cur, true) : bigText('None yet'),
@@ -182,14 +200,18 @@ function screen(realNights, roster) {
       spreadCard(r),
       deepDive(r, cur, you),
       recentCard(r, cur, state, draw),
-    )
-  }
-
-  draw()
-  return wrap
+  ]
 }
 
 // ---------- page furniture ----------
+
+/** The way into Wrapped: the period picked above, told as story cards for the group chat. */
+function insightsWrapped(nights, currency, season) {
+  const cards = wrappedFor(nights, currency, season)
+  if (!cards) return null
+  const label = season.key === null ? 'All time' : season.label
+  return wrappedEntry(cards, `${label} Wrapped`, label)
+}
 
 function header(standings) {
   const head = el('header', 'screen-title')

@@ -1,12 +1,12 @@
-// The first-run intro's animated table: one made-up game night played out in ten beats, from
-// the first buy-in to the standings. Pure - it only says what is on the table at each beat,
+// The first-run intro's animated table: one made-up game night played out in twelve beats,
+// from the first buy-in, through paying up by UPI, to the standings. Pure - it only says what is on the table at each beat,
 // and the view animates between them. Ported line for line to data/IntroDemo.kt, so the
 // website and the phone tell the same story with the same numbers.
 //
 // The settle-up arrows come from the real settle(), not a drawing: if the demo says
 // "2 payments", that is what the app would actually ask for.
 
-import { settle } from './money.js'
+import { UPI_ENABLED, settle } from './money.js'
 
 export const DEMO_SEATS = [
   { id: 'A', name: 'Arjun' },
@@ -15,9 +15,15 @@ export const DEMO_SEATS = [
   { id: 'K', name: 'Kabir' },
 ]
 
-/** When each beat starts, in ms from the top of the loop. */
-export const DEMO_BEATS_MS = [0, 600, 1100, 1600, 2100, 2900, 3900, 5600, 7600, 10000]
-export const DEMO_LOOP_MS = 13500
+/**
+ * When each beat starts, in ms from the top of the loop. With UPI on, two more beats sit
+ * between the settle-up arrows and the standings: the Pay button, then the tick.
+ */
+const BEATS = {
+  plain: { ms: [0, 600, 1100, 1600, 2100, 2900, 3900, 5600, 7600, 10000], loop: 13500 },
+  upi: { ms: [0, 600, 1100, 1600, 2100, 2900, 3900, 5600, 7600, 9600, 11200, 12800], loop: 16500 },
+}
+export const demoBeats = (upi = UPI_ENABLED) => (upi ? BEATS.upi : BEATS.plain)
 
 const BUY_IN = 50000
 /** Where the night ends: Sana rebought and lost, the rest are up or level. Sums to zero. */
@@ -43,7 +49,8 @@ export const DEMO_STANDINGS = [
  * Everything on the table at one beat. `tags` holds one entry per seat, null when the seat
  * shows nothing yet: { cents, kind } where kind is buyin | rebuy | up | down | flat.
  */
-export function demoAt(beat) {
+export function demoAt(beat, upi = UPI_ENABLED) {
+  const standingsFrom = upi ? 11 : 9
   const over = beat >= 7
   const tags = DEMO_SEATS.map((_, i) => {
     if (over) {
@@ -61,13 +68,17 @@ export function demoAt(beat) {
     centre: beat >= 8 ? 'settle' : over ? 'over' : 'pot',
     cards: beat === 5 || beat === 6,
     arrows: beat >= 8,
-    standings: beat >= 9,
-    caption: captionAt(beat),
+    // The biggest settle-up, paid by UPI: the Pay button, then the tick.
+    pay: upi && beat === 9 ? 'ask' : upi && beat === 10 ? 'paid' : null,
+    standings: beat >= standingsFrom,
+    caption: captionAt(beat, standingsFrom),
   }
 }
 
-function captionAt(beat) {
-  if (beat >= 9) return 'Every night adds to your standings'
+function captionAt(beat, standingsFrom) {
+  if (beat >= standingsFrom) return 'Every night adds to your standings'
+  if (beat >= 10) return 'Paid and ticked off. No chasing anyone.'
+  if (beat >= 9) return 'Tap Pay: UPI opens with the amount filled in'
   if (beat >= 8) return `Everyone square in ${DEMO_TRANSFERS.length} payments`
   if (beat >= 7) return 'The game ends. Stacks are counted.'
   if (beat >= 6) return 'A rebuy is one tap'
@@ -75,9 +86,10 @@ function captionAt(beat) {
 }
 
 /** Which beat is showing `ms` into the loop. */
-export function beatAt(ms) {
-  const t = ((ms % DEMO_LOOP_MS) + DEMO_LOOP_MS) % DEMO_LOOP_MS
+export function beatAt(ms, upi = UPI_ENABLED) {
+  const { ms: starts, loop } = demoBeats(upi)
+  const t = ((ms % loop) + loop) % loop
   let beat = 0
-  DEMO_BEATS_MS.forEach((start, i) => { if (t >= start) beat = i })
+  starts.forEach((start, i) => { if (t >= start) beat = i })
   return beat
 }

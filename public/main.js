@@ -14,6 +14,7 @@ import { introSeen, introView, markIntroSeen } from './views/intro.js'
 import { newGameView } from './views/newgame.js'
 import { peopleView } from './views/people.js'
 import { settingsView } from './views/settings.js'
+import { settleAllView } from './views/settleall.js'
 import { signinView } from './views/signin.js'
 import { playSplash } from './views/splash.js'
 
@@ -98,6 +99,12 @@ function render() {
 
   if (location.hash === '#/new') {
     swap(newGameView())
+    app.appendChild(tabBar(null))
+    return
+  }
+
+  if (location.hash === '#/settle') {
+    swap(settleAllView())
     app.appendChild(tabBar(null))
     return
   }

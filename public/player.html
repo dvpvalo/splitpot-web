@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" data-theme="lounge">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0e0f11">
+<title>Player card · Splitpot</title>
+<link rel="stylesheet" href="app.css">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  .card-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+  .card-head .title { margin: 0; }
+  .made { text-align: center; margin: 28px 0 8px; }
+</style>
+</head>
+<body>
+<div id="banner" class="banner" hidden></div>
+<main class="screen" id="app"><p class="muted">Loading…</p></main>
+<script type="module">
+// One player's record, published by the host. Every section is the app's own Insights code
+// (views/insights.js on lib/insights.js), so the card cannot disagree with the host's screen.
+// Publishable key: safe to ship. anon can only EXECUTE get_player_card, which returns null
+// unless the host switched this player's card on, and carries no payment details or ids.
+import { playerSections } from './views/insights.js'
+import { currenciesFor } from './lib/insights.js'
+import { seasonsIn } from './lib/stats.js'
+import { clear, el, monogram, mount } from './ui.js'
+
+const SUPABASE_URL = 'https://sdslqdlmputkhadbrtnm.supabase.co'
+const SUPABASE_KEY = 'sb_publishable_w7JkJoarKKptxjlU8Zp34A_bNEv02M-'
+const app = document.getElementById('app')
+const slug = new URLSearchParams(location.search).get('p') ?? ''
+const camel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+const say = (text) => { clear(app); app.appendChild(el('p', 'muted', text)) }
+
+async function load() {
+  if (!/^[A-Za-z0-9_-]{8,32}$/.test(slug)) return say("That card link doesn't look right.")
+  let data
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_player_card`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', apikey: SUPABASE_KEY, authorization: `Bearer ${SUPABASE_KEY}` },
+      body: JSON.stringify({ p_slug: slug }),
+    })
+    if (!res.ok) throw new Error(String(res.status))
+    data = await res.json()
+  } catch (e) {
+    return say("Couldn't load this card. Try again in a moment.")
+  }
+  if (!data) return say('This card is switched off.')
+  draw(data)
+}
+
+function draw(data) {
+  const nights = data.nights.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [camel(k), v])))
+  const names = new Map(nights.map((n) => [n.playerId, n.playerName]))
+  const personOf = (id) => ({ name: names.get(id) ?? '?', avatar: id === 'me' ? data.player.avatar : null })
+  const state = { tab: 'insights', player: 'me', seasonKey: null, currency: null, view: 'session', rivalsShown: 4, recentShown: 5 }
+  document.title = `${data.player.name} · Splitpot`
+
+  const redraw = () => {
+    clear(app)
+    const head = el('header', 'card-head')
+    mount(head, monogram({ name: data.player.name, avatar: data.player.avatar }, 'monogram monogram-lg'),
+      mount(el('div'),
+        el('p', 'eyebrow', data.host ? `Player card · ${data.host}'s games` : 'Player card'),
+        el('h1', 'title', data.player.name)))
+    app.appendChild(head)
+
+    const mine = nights.filter((n) => n.playerId === 'me')
+    if (mine.length === 0) {
+      app.appendChild(el('p', 'muted', 'No finished games yet.'))
+    } else {
+      const currencies = currenciesFor(nights, 'me')
+      if (!currencies.includes(state.currency)) state.currency = currencies[0]
+      const seasons = seasonsIn(mine)
+      const season = seasons.find((s) => s.key === state.seasonKey) ?? seasons[0]
+      state.seasonKey = season.key
+      const row = el('div', 'ins-filter-row')
+      row.appendChild(pick('Period', seasons.map((s) => [s.key ?? '', s.label]), season.key ?? '', (v) => { state.seasonKey = v || null; redraw() }))
+      if (currencies.length > 1) row.appendChild(pick('Currency', currencies.map((c) => [c, c]), state.currency, (v) => { state.currency = v; redraw() }))
+      app.appendChild(row)
+      mount(app, ...playerSections(nights, state, season, personOf, redraw, false))
+    }
+    const made = el('p', 'muted small made')
+    const link = el('a', null, 'Splitpot')
+    link.href = './'
+    mount(made, document.createTextNode('Made with '), link, document.createTextNode(' · keep score at home poker games'))
+    app.appendChild(made)
+  }
+  redraw()
+}
+
+/** A native <select> in the app's pill style, so the phone's own picker opens. */
+function pick(label, options, value, onChange) {
+  const wrap = el('label', 'select-wrap')
+  const sel = el('select', 'select')
+  sel.setAttribute('aria-label', label)
+  for (const [v, text] of options) {
+    const o = el('option', null, text)
+    o.value = v
+    if (v === value) o.selected = true
+    sel.appendChild(o)
+  }
+  sel.addEventListener('change', () => onChange(sel.value))
+  wrap.appendChild(sel)
+  return wrap
+}
+
+load()
+</script>
+</body>
+</html>

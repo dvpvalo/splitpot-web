@@ -335,6 +335,52 @@ export function rivalsFor(nights, playerId, currency, season = null) {
   return { rivals, nemesis: pick(edge), favourite: pick((r) => -edge(r)) }
 }
 
+/** How many bars the season race shows at once. */
+export const RACE_TOP = 8
+
+/**
+ * The season race: one frame per finished game in the period, oldest first, with everyone's
+ * running total after it, best first (ties by name), the top RACE_TOP kept. Each player keeps
+ * one colour index all the way through: the order they first sat down (ties by name).
+ */
+export function raceFrames(nights, currency, season = null) {
+  const scoped = nights.filter((n) => n.currency === currency && inSeason(n, season)).sort(chronological)
+  const games = []
+  const byGame = new Map()
+  for (const n of scoped) {
+    if (!byGame.has(n.gameId)) { byGame.set(n.gameId, []); games.push(n) }
+    byGame.get(n.gameId).push(n)
+  }
+  const totals = new Map()
+  const names = new Map()
+  const colours = new Map()
+  return games.map((g, i) => {
+    for (const n of byGame.get(g.gameId).sort((a, b) => cmp(a.playerName, b.playerName))) {
+      if (!colours.has(n.playerId)) colours.set(n.playerId, colours.size)
+      names.set(n.playerId, n.playerName)
+      totals.set(n.playerId, (totals.get(n.playerId) ?? 0) + n.netCents)
+    }
+    const rows = [...totals.entries()]
+      .map(([id, t]) => ({ playerId: id, name: names.get(id), totalCents: t, colour: colours.get(id) }))
+      .sort((a, b) => b.totalCents - a.totalCents || cmp(a.name, b.name))
+    return { gameId: g.gameId, gameName: g.gameName, playedOn: g.playedOn, index: i + 1, of: games.length, rows: rows.slice(0, RACE_TOP) }
+  })
+}
+
+/** Each game takes RACE_STEP_MS: the bars move for RACE_MOVE_MS, then hold. The end holds RACE_END_MS. */
+export const RACE_STEP_MS = 1200
+export const RACE_MOVE_MS = 900
+export const RACE_END_MS = 2000
+export const raceDuration = (frames) => frames * RACE_STEP_MS + RACE_END_MS
+
+/** Where the race is at `ms`: 0 is before the first game, `frames` is the final standings. Eased in and out. */
+export function raceAt(ms, frames) {
+  const k = Math.floor(Math.max(ms, 0) / RACE_STEP_MS)
+  if (k >= frames) return frames
+  const p = Math.min((ms - k * RACE_STEP_MS) / RACE_MOVE_MS, 1)
+  return k + (p < 0.5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2)
+}
+
 /**
  * The comparison chart on the standings tab: every finished game in the period on one axis,
  * oldest first, and each chosen player's running total across it. A player who sat a game

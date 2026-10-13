@@ -10,8 +10,8 @@
 // a player) is the same call the People screen makes, with its failure shown.
 
 import { addPlayer, players } from '../db.js'
-import { DEMO_BEATS_MS, DEMO_LOOP_MS, DEMO_SEATS, DEMO_STANDINGS, DEMO_TRANSFERS, demoAt } from '../lib/intro.js'
-import { formatMoney } from '../lib/money.js'
+import { DEMO_SEATS, DEMO_STANDINGS, DEMO_TRANSFERS, demoAt, demoBeats } from '../lib/intro.js'
+import { UPI_ENABLED, formatMoney } from '../lib/money.js'
 import { button, clear, clearBanner, el, mount, showError } from '../ui.js'
 import { capitalizeFirst } from './newgame.js'
 
@@ -72,6 +72,7 @@ export function introView(finish) {
         el('p', 'ins-sub', 'From the first buy-in to the last payment, on one phone.'),
         feature('Every buy-in and rebuy, logged in a tap'),
         feature('Who pays whom, worked out at the end'),
+        UPI_ENABLED ? feature('Pay up by UPI in one tap, amount filled in') : null,
         feature('No spreadsheet. No arguing over the numbers.'),
         el('p', 'intro-free', '✓ Free, every feature, no card needed'),
       )
@@ -219,7 +220,7 @@ export function demoTable(fixedBeat = null) {
   const wrap = el('div', 'demo-wrap')
   const box = el('div', 'demo')
   box.setAttribute('role', 'img')
-  box.setAttribute('aria-label', 'A game night played out: four buy-ins, a rebuy, the results, two settle-up payments, then the standings.')
+  box.setAttribute('aria-label', 'A game night played out: four buy-ins, a rebuy, the results, two settle-up payments, one paid by UPI in a tap, then the standings.')
   const felt = el('div', 'demo-felt')
 
   const cards = el('div', 'demo-cards')
@@ -265,6 +266,20 @@ export function demoTable(fixedBeat = null) {
     svg.appendChild(text)
   }
 
+  // The biggest settle-up, paid by UPI: what a Pay button on a settle-up ticket does.
+  const owed = DEMO_TRANSFERS[0]
+  const amount = formatMoney(owed.cents, 'INR')
+  const pay = el('div', 'demo-pay')
+  mount(pay,
+    el('p', 'ins-label ins-label-plain', 'Settle up'),
+    mount(el('div', 'demo-pay-row'),
+      el('span', 'demo-pay-who', `${DEMO_SEATS[owed.from].name} pays ${DEMO_SEATS[owed.to].name}`),
+      el('span', 'demo-pay-amt', amount)),
+    el('span', 'demo-pay-btn', 'Pay with UPI'),
+    el('span', 'demo-pay-done', '✓ Paid'),
+    el('p', 'demo-pay-note', `Opens your UPI app with ${amount} for ${DEMO_SEATS[owed.to].name} filled in`),
+  )
+
   const standings = el('div', 'demo-standings')
   mount(standings, el('p', 'ins-label ins-label-plain', 'All-time standings'))
   const tbl = el('div', 'demo-lb')
@@ -276,7 +291,7 @@ export function demoTable(fixedBeat = null) {
   })
   standings.appendChild(tbl)
 
-  mount(box, felt, cards, centre, svg, ...seats.flatMap((s) => [s.seat, s.tag]), standings)
+  mount(box, felt, cards, centre, svg, ...seats.flatMap((s) => [s.seat, s.tag]), pay, standings)
   const caption = el('p', 'demo-caption')
   caption.setAttribute('aria-live', 'polite')
   mount(wrap, box, caption)
@@ -300,8 +315,10 @@ export function demoTable(fixedBeat = null) {
       centre.appendChild(el('span', 'demo-over', s.centre === 'over' ? 'Game over' : `${DEMO_TRANSFERS.length} settle-ups`))
     }
     svg.classList.toggle('demo-on', s.arrows)
+    pay.classList.toggle('demo-on', s.pay !== null)
+    pay.classList.toggle('demo-paid', s.pay === 'paid')
     standings.classList.toggle('demo-on', s.standings)
-    box.classList.toggle('demo-dim', s.standings)
+    box.classList.toggle('demo-dim', s.standings || s.pay !== null)
     if (caption.textContent !== s.caption) {
       caption.classList.remove('demo-caption-in')
       void caption.offsetWidth
@@ -319,9 +336,10 @@ export function demoTable(fixedBeat = null) {
   }
   const tick = () => {
     apply(beat)
-    const now = DEMO_BEATS_MS[beat]
-    const nextBeat = (beat + 1) % DEMO_BEATS_MS.length
-    const wait = nextBeat === 0 ? DEMO_LOOP_MS - now : DEMO_BEATS_MS[nextBeat] - now
+    const { ms: starts, loop } = demoBeats()
+    const now = starts[beat]
+    const nextBeat = (beat + 1) % starts.length
+    const wait = nextBeat === 0 ? loop - now : starts[nextBeat] - now
     beat = nextBeat
     timer = setTimeout(tick, wait)
   }

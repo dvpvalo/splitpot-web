@@ -1,11 +1,12 @@
 // People: the leaderboard, the season chips above it, the records sheet behind each row, and
 // the contact book underneath. Players and leaderboard are one screen here, as on the phone.
 
-import { addPlayer, deletePlayer, hostStats, playerGameCount, players, updatePlayer } from '../db.js'
-import { formatMoney } from '../lib/money.js'
+import { addPlayer, deletePlayer, hostStats, playerGameCount, players, setPlayerCard, updatePlayer } from '../db.js'
+import { UPI_ENABLED, formatMoney, isUpiId } from '../lib/money.js'
 import { recordsFor, seasonsIn, standingsFor, streakLabel } from '../lib/stats.js'
 import { shortDate } from '../lib/time.js'
-import { button, clear, clearBanner, el, money, monogram, mount, screenTitle, sheet, showError } from '../ui.js'
+import { button, clear, clearBanner, el, money, monogram, mount, screenTitle, sheet, showError, showNotice } from '../ui.js'
+import { playerCardMessage, playerCardUrl } from '../lib/share.js'
 
 /**
  * The faces on offer. Deliberately a short fixed list rather than the emoji keyboard: a
@@ -20,6 +21,7 @@ const AVATARS = [
 
 const PAYMENT_TYPES = [
   ['none', 'None'],
+  ['upi', 'UPI'],
   ['bank', 'Bank transfer'],
   ['paypal', 'PayPal'],
   ['revolut', 'Revolut'],
@@ -29,6 +31,8 @@ const PAYMENT_TYPES = [
 ]
 
 const typeLabel = (wire) => PAYMENT_TYPES.find(([w]) => w === wire)?.[1] ?? 'None'
+// Offered in the form only while UPI is switched on; a saved UPI player still reads right.
+const OFFERED = PAYMENT_TYPES.filter(([w]) => w !== 'upi' || UPI_ENABLED)
 
 export function peopleView() {
   const root = el('main', 'screen screen-wide')
@@ -219,7 +223,8 @@ function playerEditSheet(existing, reload) {
 
   const typeSelect = el('select')
   typeSelect.className = 'field'
-  for (const [wire, label] of PAYMENT_TYPES) {
+  const kept = PAYMENT_TYPES.filter(([w]) => w === existing?.payment_type && !OFFERED.some(([o]) => o === w))
+  for (const [wire, label] of [...OFFERED, ...kept]) {
     const opt = el('option', null, label)
     opt.value = wire
     typeSelect.appendChild(opt)
@@ -229,11 +234,17 @@ function playerEditSheet(existing, reload) {
   const detailsInput = el('input')
   detailsInput.className = 'field'
   detailsInput.maxLength = 120
-  detailsInput.placeholder = 'Sort code and account, @handle, UPI id…'
   detailsInput.value = existing?.payment_details ?? ''
 
   const detailsWrap = field('Details', detailsInput)
-  const syncDetails = () => { detailsWrap.hidden = typeSelect.value === 'none' }
+  const syncDetails = () => {
+    detailsWrap.hidden = typeSelect.value === 'none'
+    const upi = typeSelect.value === 'upi'
+    // A UPI id gets a "Pay" button on every settle-up that pays this player.
+    detailsInput.placeholder = upi ? 'UPI id, like name@okhdfcbank' : 'Sort code and account, @handle…'
+    detailsInput.autocapitalize = upi ? 'off' : 'sentences'
+    detailsInput.inputMode = upi ? 'email' : 'text'
+  }
   typeSelect.addEventListener('change', syncDetails)
   syncDetails()
 
@@ -242,6 +253,11 @@ function playerEditSheet(existing, reload) {
   const submit = async () => {
     const name = nameInput.value.trim()
     if (!name) return
+    if (typeSelect.value === 'upi' && !isUpiId(detailsInput.value)) {
+      showError('That UPI id does not look right. It is name@bank, like yash@okhdfcbank.')
+      detailsInput.focus()
+      return
+    }
     save.disabled = true
     save.textContent = 'Saving…'
     clearBanner()
@@ -270,15 +286,86 @@ function playerEditSheet(existing, reload) {
     el('p', 'muted small', 'Makes them easier to spot at a busy table. Initials if you skip it.'),
     faceWrap,
     el('h3', 'section-label', 'Payment details (optional)'),
-    el('p', 'muted small', 'Only shown on the ledger if this player is owed money.'),
+    el('p', 'muted small', UPI_ENABLED
+      ? 'Only shown on the ledger if this player is owed money. With a UPI id, whoever owes them gets a Pay button.'
+      : 'Only shown on the ledger if this player is owed money.'),
     field('Type', typeSelect),
     detailsWrap,
     save,
   )
+  if (existing) body.appendChild(cardSection(existing, reload))
   if (existing) body.appendChild(removePlayer(existing, reload, () => dlg.close()))
 
   const dlg = sheet(existing ? `Edit ${existing.name}` : 'Add a player', body)
   return dlg
+}
+
+/**
+ * The player's public card: their record, badges and rivals at one link. OFF until switched
+ * on, per player. ON asks first and says plainly what becomes visible; OFF never asks, since
+ * that is the safe direction. Same rule as Share your standings in Settings.
+ */
+function cardSection(player, reload) {
+  const wrap = el('div', 'stack-tight')
+  let slug = player.card_slug ?? null
+  const state = el('p', 'muted small')
+  const links = el('div', 'stack-tight')
+  const toggle = button('', () => flip(), 'btn')
+
+  const draw = () => {
+    toggle.textContent = slug ? 'Turn off player card' : 'Turn on player card'
+    toggle.className = `btn${slug ? ' btn-on' : ''}`
+    state.textContent = slug
+      ? 'On. Turning it off makes the link dead immediately.'
+      : 'Off. Nothing is shared until you turn this on.'
+    clear(links)
+    if (slug) mount(links, button('Share link', () => shareCard(player.name, slug), 'btn-link'), el('p', 'muted small', playerCardUrl(slug)))
+  }
+
+  const flip = async () => {
+    const want = !slug
+    if (want && !confirm(
+      `Publish ${player.name}'s player card?\n\n`
+      + `Anyone with the link sees every finished game ${player.name} has played: their results, `
+      + 'badges, and the names of the people they played with and how they did against them. '
+      + 'You can switch it off at any time.',
+    )) return
+    toggle.disabled = true
+    clearBanner()
+    try {
+      slug = await setPlayerCard(player.id, want)
+      player.card_slug = slug
+      draw()
+      reload()
+    } catch (e) {
+      showError(`That switch did NOT change: ${e.message ?? e}`)
+    } finally {
+      toggle.disabled = false
+    }
+  }
+
+  draw()
+  return mount(wrap,
+    el('h3', 'section-label', 'Player card'),
+    el('p', 'muted small', 'One link with their record, badges and rivals, to send them. No app, no account.'),
+    state, toggle, links,
+  )
+}
+
+/** Hands off to the OS share sheet where there is one, the clipboard where there is not. */
+async function shareCard(name, slug) {
+  const text = playerCardMessage(name, slug)
+  try {
+    if (navigator.share) {
+      await navigator.share({ text, url: playerCardUrl(slug) })
+      return
+    }
+    await navigator.clipboard.writeText(text)
+    showNotice('Link copied to the clipboard.')
+  } catch (e) {
+    if (e && e.name === 'AbortError') return
+    showError(`Could not share that link: ${e.message ?? e}`)
+  }
 }
 
 /**

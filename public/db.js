@@ -142,12 +142,15 @@ sessionReady.then(({ data }) => { cachedUid = data.session?.user?.id ?? null })
 /** Everything one game screen needs, assembled from five tables in parallel. */
 export async function gameDetail(gameId) {
   return authed(async () => {
-    const [g, seatRows, roster, entries, settlements] = await Promise.all([
+    const [g, seatRows, roster, entries, settlements, requests] = await Promise.all([
       q(client.from('games').select('*').eq('id', gameId).single()),
       q(client.from('game_players').select('*').eq('game_id', gameId).order('seat_order')),
       players(),
       q(client.from('entries').select('*').eq('game_id', gameId).order('created_at')),
       q(client.from('settlements').select('*').eq('game_id', gameId)),
+      // What players have asked for from the ledger page, still waiting on the host.
+      q(client.from('table_requests').select('*').eq('game_id', gameId).eq('status', 'pending')
+        .order('created_at')),
     ])
 
     const playersById = new Map(roster.map((p) => [p.id, p]))
@@ -187,6 +190,7 @@ export async function gameDetail(gameId) {
       seats,
       entries,
       settlements,
+      requests,
       buyInCents,
       cashOutCents,
       inPlayCents: buyInCents - cashOutCents,
@@ -213,6 +217,7 @@ export function gameChanges(gameId, onChange) {
   watch('entries', `game_id=eq.${gameId}`)
   watch('game_players', `game_id=eq.${gameId}`)
   watch('settlements', `game_id=eq.${gameId}`)
+  watch('table_requests', `game_id=eq.${gameId}`)
   watch('games', `id=eq.${gameId}`)
 
   // The socket carries its own auth. Without a token the server applies RLS as `anon`,
@@ -291,6 +296,26 @@ export const seatPlayer = (gameId, playerId, seatOrder) => authed(() => q(
     .select().single(),
 ))
 
+/**
+ * A new seating, written in ONE upsert so the table is never half-reshuffled. `seats` is the
+ * game's seats in their new order; every row carries its keys so the upsert can only update.
+ */
+export async function shuffleSeats(gameId, seats) {
+  const rows = await authed(() => q(client.from('game_players').upsert(seats.map((s, i) => ({
+    id: s.gamePlayerId, game_id: gameId, player_id: s.player.id, seat_order: i,
+  }))).select('id')))
+  if (rows.length !== seats.length) throw new Error('not every seat moved')
+}
+
+/**
+ * The host's answer to an ask from the ledger page. Approving writes the entry and closes the
+ * ask in ONE server transaction; an ask already answered (another device) throws, so a double
+ * approve can never log twice.
+ */
+export const decideRequest = (id, approve) => authed(() => q(
+  client.rpc('decide_request', { p_id: id, p_approve: approve }),
+))
+
 export const unseatPlayer = (gamePlayerId) => authed(() => q(
   client.from('game_players').delete().eq('id', gamePlayerId),
 ))
@@ -346,6 +371,73 @@ export const setSettlementPaid = (settlementId, paid) => authed(() => q(
   }).eq('id', settlementId),
 ))
 
+/**
+ * Ticks many debts in ONE statement, so it is all or nothing. Throws unless every row
+ * changed: rows RLS hides update silently, and a half-cleared list must never look done.
+ */
+export const setSettlementsPaid = (ids) => authed(async () => {
+  const rows = await q(client.from('settlements').update({
+    status: 'paid', paid_at: new Date().toISOString(),
+  }).in('id', ids).select('id'))
+  if (rows.length !== ids.length) throw new Error(`only ${rows.length} of ${ids.length} were ticked`)
+})
+
+// ---------- game invites ----------
+
+/** The newest invite not yet started, with every reply, or null. */
+export const openInvite = () => authed(async () => {
+  const rows = await q(client.from('invites')
+    .select('id,slug,title,starts_at,location,created_at,invite_replies(player_id,answer,updated_at)')
+    .is('game_id', null)
+    .order('created_at', { ascending: false })
+    .limit(1))
+  return rows[0] ?? null
+})
+
+/** `startsAt` is a Date; Postgres keeps the instant, every phone shows it in its own time. */
+export const createInvite = ({ title, startsAt, location = null }) => authed(() => q(
+  client.from('invites').insert({
+    host_id: uid(),
+    title: title.trim(),
+    starts_at: startsAt.toISOString(),
+    location: location?.trim() || null,
+  }).select('id,slug,title,starts_at,location,created_at').single(),
+))
+
+export const cancelInvite = (id) => authed(async () => {
+  const rows = await q(client.from('invites').delete().eq('id', id).select('id'))
+  if (rows.length === 0) throw new Error('that invite was not found')
+})
+
+/**
+ * Starts the game an invite was for: creates it with the invite's title, day and place and
+ * the host's usual currency and blinds, closes the invite against it, then seats everyone
+ * who said In, first to answer in the first seat. The invite is closed BEFORE seating so a
+ * second tap after a failed seat cannot make a second game; a seat that fails throws, naming
+ * who, and the game is already there to seat them by hand.
+ */
+export async function startInvite(invite) {
+  const me = await profile()
+  const day = new Date(invite.starts_at)
+  const playedOn = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
+  const created = await createGame({
+    name: invite.title,
+    playedOn,
+    currency: me?.default_currency ?? 'GBP',
+    smallBlindCents: me?.default_small_blind_cents ?? null,
+    bigBlindCents: me?.default_big_blind_cents ?? null,
+    location: invite.location,
+  })
+  const closed = await authed(() => q(client.from('invites')
+    .update({ game_id: created.id }).eq('id', invite.id).select('id')))
+  if (closed.length === 0) throw new Error('the invite could not be closed')
+  const going = (invite.invite_replies ?? [])
+    .filter((r) => r.answer === 'in')
+    .sort((a, b) => (a.updated_at < b.updated_at ? -1 : a.updated_at > b.updated_at ? 1 : 0))
+  for (const [i, r] of going.entries()) await seatPlayer(created.id, r.player_id, i)
+  return created
+}
+
 // ---------- the contact book ----------
 
 const playerPayload = ({ name, paymentType = 'none', paymentDetails = null, avatar = null }) => ({
@@ -393,6 +485,14 @@ export const saveProfile = ({
  * this one makes every player's name and result readable by anyone holding the link, and
  * that must never happen as a side effect of editing a phone number.
  */
+/**
+ * A player's public card. On mints a NEW slug every time (so off-then-on kills the old link),
+ * off clears it. Returns the slug, or null when off.
+ */
+export const setPlayerCard = (playerId, on) => authed(() => q(
+  client.rpc('set_player_card', { p_player_id: playerId, p_on: on }),
+))
+
 export const setPublicHistory = (enabled) => authed(() => q(
   client.from('profiles').update({ public_db_enabled: enabled }).eq('id', uid()),
 ))

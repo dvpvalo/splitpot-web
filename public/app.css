@@ -1909,6 +1909,30 @@ a.card:not(.row) { flex-direction: column; gap: 4px; align-items: flex-start; }
   transition: opacity 400ms ease, transform 500ms cubic-bezier(.2, 1.2, .4, 1);
 }
 .demo-standings.demo-on { opacity: 1; transform: translateY(-50%); }
+.demo-pay {
+  position: absolute; z-index: 5; left: 10%; right: 10%; top: 50%;
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  padding: 14px; border-radius: 16px; background: var(--ticket); color: var(--ticket-ink);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.45);
+  opacity: 0; transform: translateY(-30%) scale(0.96); pointer-events: none;
+  transition: opacity 400ms ease, transform 500ms cubic-bezier(.2, 1.2, .4, 1);
+}
+.demo-pay.demo-on { opacity: 1; transform: translateY(-50%); }
+.demo-pay .ins-label { color: var(--ticket-muted); margin: 0; }
+.demo-pay-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.demo-pay-who { font-weight: 700; }
+.demo-pay-amt { font-family: var(--display); font-size: 1.375rem; color: var(--ticket-red); }
+.demo-pay-btn, .demo-pay-done {
+  display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 999px; font-weight: 800;
+}
+.demo-pay-btn { background: var(--ticket-ink); color: var(--ticket); }
+.demo-pay.demo-on:not(.demo-paid) .demo-pay-btn { animation: demo-press 1.6s ease 500ms both; }
+@keyframes demo-press { 0%, 40% { transform: scale(1); } 50% { transform: scale(0.92); filter: brightness(1.3); } 60%, 100% { transform: scale(1); } }
+.demo-pay-done { display: none; background: var(--ticket-green); color: var(--ticket); animation: demo-pop 400ms ease; }
+.demo-paid .demo-pay-btn { display: none; }
+.demo-paid .demo-pay-done { display: flex; }
+.demo-paid .demo-pay-amt { color: var(--ticket-muted); }
+.demo-pay-note { margin: 0; font-size: 0.8125rem; color: var(--ticket-muted); text-align: center; }
 .demo-lb { display: flex; flex-direction: column; margin-top: 8px; }
 .demo-lb-row { display: grid; grid-template-columns: 16px 1fr auto auto; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 0.875rem; }
 .demo-lb-row:first-child { border-top: 0; }
@@ -1920,7 +1944,8 @@ a.card:not(.row) { flex-direction: column; gap: 4px; align-items: flex-start; }
 
 @media (prefers-reduced-motion: reduce) {
   .intro-body, .intro-chip, .demo-caption-in, .demo-pot, .demo-over { animation: none; }
-  .demo-tag, .demo-card, .demo-standings, .intro-fill { transition: none; }
+  .demo-tag, .demo-card, .demo-standings, .demo-pay, .intro-fill { transition: none; }
+  .demo-pay-btn, .demo-pay-done { animation: none !important; }
   .demo-arrows.demo-on .demo-arrow, .demo-arrows.demo-on .demo-arrow-label { animation: none; }
 }
 
@@ -2028,3 +2053,62 @@ a.card:not(.row) { flex-direction: column; gap: 4px; align-items: flex-start; }
 .h2h-even { background: var(--track); color: var(--text); }
 .h2h-self, .h2h-none { color: var(--muted); }
 @media (max-width: 400px) { .h2h-row-name { display: none; } }
+
+/* ---------- UPI pay ---------- */
+.btn-pay { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; margin: 0; }
+.tickets .btn-pay { color: var(--ticket); background: var(--ticket-ink); box-shadow: none; }
+.tickets .row-right { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
+.tickets .row-right .money { flex-basis: 100%; text-align: right; }
+
+/* ---------- Wrapped ---------- */
+.wrapped-entry {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: var(--text);
+  background: linear-gradient(120deg, color-mix(in srgb, #F2B45A 22%, var(--surface)), var(--surface) 70%);
+  border: 1px solid color-mix(in srgb, #F2B45A 40%, transparent);
+}
+.wrapped-entry:disabled { opacity: 0.6; cursor: default; }
+.wrapped-entry-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.wrapped-entry-title { font-family: var(--serif); font-size: 1.25rem; font-weight: 700; }
+.wrapped-entry-play {
+  flex: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 18px;
+  border-radius: 999px; background: #F2B45A; color: #1a1205; font-weight: 800;
+}
+.wrapped {
+  position: fixed; inset: 0; z-index: 100; background: #050807;
+  display: flex; flex-direction: column; align-items: center;
+  padding: max(12px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+.wrapped-bars { display: flex; gap: 4px; width: 100%; max-width: 480px; }
+.wrapped-bars span { flex: 1; height: 3px; border-radius: 2px; background: rgb(255 255 255 / 0.25); }
+.wrapped-bars span.on { background: #F2B45A; }
+.wrapped-close {
+  position: absolute; top: max(24px, calc(env(safe-area-inset-top) + 12px)); right: 16px;
+  width: 44px; min-height: 44px; padding: 0; border-radius: 999px; z-index: 1;
+}
+.wrapped-stage { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; margin: 12px 0; cursor: pointer; }
+.wrapped-card { max-width: 100%; max-height: 100%; aspect-ratio: 9 / 16; border-radius: 16px; box-shadow: 0 10px 40px rgb(0 0 0 / 0.5); }
+.wrapped-foot { display: flex; gap: 10px; width: 100%; max-width: 480px; }
+.wrapped-foot .btn { flex: 1; }
+
+/* ---------- Home: the next game ---------- */
+.home-plan { align-self: center; }
+.home-rsvp { margin: 0; font-weight: 700; color: var(--primary); }
+.home-pair { display: flex; gap: 8px; }
+.home-pair > * { flex: 1; min-width: 0; }
+.home-cancel { color: var(--danger); margin-top: 12px; }
+.stack-tight > .tag { align-self: flex-start; }
+
+/* The join sheet: a QR any camera reads (dark on white, whatever the theme) and the code. */
+.join { text-align: center; }
+.join-qr { width: min(100%, 280px); margin: 0 auto; border-radius: 16px; overflow: hidden; }
+.join-qr svg { display: block; width: 100%; height: auto; }
+.join-code { margin: 16px 0 4px; font-family: var(--display); font-size: 2.5rem; letter-spacing: 0.14em; line-height: 1.1; color: var(--text); }
+
+/* Asks from the ledger page: rebuys and stack counts waiting on the host. */
+.requests { border-color: color-mix(in srgb, var(--primary) 45%, var(--line)); }
+.request-row { gap: 8px; }
+.request-row .btn-rebuy, .request-row .btn-link { flex: none; }
+.stack-verdict { margin: 4px 0 0; font-weight: 700; }
+.stack-ok { color: var(--up); }
+.stack-off { color: var(--down); }

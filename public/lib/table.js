@@ -105,6 +105,41 @@ export function rackEdges(seats) {
 }
 
 /** "Soham A." - a first name and an initial fits a seat plate; the sheet has the full name. */
+/**
+ * What the last player still at the table cashes out: everything left on it. Only when every
+ * OTHER seat has cashed out (and there is at least one), this one has not, and money is left -
+ * otherwise null. The money has to add up, so it is the one cash-out that needs no counting.
+ */
+export function whatsLeft(seats, gamePlayerId, inPlayCents) {
+  const me = seats.find((s) => s.gamePlayerId === gamePlayerId)
+  const others = seats.filter((s) => s.gamePlayerId !== gamePlayerId)
+  if (!me || me.hasCashedOut || others.length === 0 || inPlayCents <= 0) return null
+  return others.every((s) => s.hasCashedOut) ? inPlayCents : null
+}
+
+/**
+ * The roster for seating, regulars first: whoever played most recently on top, more games
+ * breaking a tie, and anyone who has never finished a game after them in the order given.
+ * `nights` is host_stats' per-player rows ({ playerId, playedOn } with an ISO date).
+ */
+export function regularsFirst(players, nights) {
+  const last = new Map()
+  const count = new Map()
+  for (const n of nights) {
+    if (!last.has(n.playerId) || n.playedOn > last.get(n.playerId)) last.set(n.playerId, n.playedOn)
+    count.set(n.playerId, (count.get(n.playerId) ?? 0) + 1)
+  }
+  return players
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => {
+      const la = last.get(a.p.id) ?? ''
+      const lb = last.get(b.p.id) ?? ''
+      if (la !== lb) return la < lb ? 1 : -1
+      return (count.get(b.p.id) ?? 0) - (count.get(a.p.id) ?? 0) || a.i - b.i
+    })
+    .map(({ p }) => p)
+}
+
 export function seatName(name) {
   const parts = name.trim().split(/\s+/)
   return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0]

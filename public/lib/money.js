@@ -88,6 +88,32 @@ export function formatAmount(cents, currency) {
     : `${sign}${whole}.${String(frac).padStart(digits, '0')}`
 }
 
+/** The rounding choices for settling up, in whole units of the game's currency. 0 = exact. */
+export const ROUND_CHOICES = [0, 10, 50]
+
+/**
+ * Results rounded to whole steps before settling, so nobody pays 93. Still adds up: each net is
+ * floored to a step and the steps that leaves over go to the biggest remainders (ties by
+ * player id, so every device agrees). Each person moves by LESS than one step. A table that
+ * does not balance is left exact - its gap is already shown, and rounding would hide it.
+ */
+export function roundedNets(standings, stepCents) {
+  if (!stepCents || stepCents <= 0) return standings
+  if (standings.reduce((sum, s) => sum + s.netCents, 0) !== 0) return standings
+  const rows = standings.map((s) => {
+    const floored = Math.floor(s.netCents / stepCents) * stepCents
+    return { s, floored, rem: s.netCents - floored }
+  })
+  let extra = rows.reduce((sum, r) => sum + r.rem, 0) / stepCents
+  const order = [...rows].sort((a, b) => b.rem - a.rem
+    || (a.s.playerId < b.s.playerId ? -1 : a.s.playerId > b.s.playerId ? 1 : 0))
+  for (const r of order) {
+    if (extra <= 0) break
+    if (r.rem > 0) { r.floored += stepCents; extra-- }
+  }
+  return rows.map((r) => ({ ...r.s, netCents: r.floored }))
+}
+
 /**
  * Greedy largest-debtor-to-largest-creditor matching. At most (n-1) transfers, which is
  * what "the smallest set of payments" means in practice.

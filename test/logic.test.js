@@ -1122,3 +1122,62 @@ test('games: rules split one per line, blanks and typed bullets dropped', () => 
   const blank = DEFAULT_GAMES.filter((g) => ruleLines(g.rules).length === 0).map((g) => g.name)
   assert.deepEqual(blank, ['3 Patti poker', 'Fruits', 'Saddam'])
 })
+
+// ---------- the last cash-out (port of TableLayoutTest) ----------
+
+import { whatsLeft } from '../public/lib/table.js'
+
+test('the last player at the table cashes out whatever is left', () => {
+  const seat = (id, out) => ({ gamePlayerId: id, hasCashedOut: out })
+  const table = [seat('a', true), seat('b', false), seat('c', true)]
+  assert.equal(whatsLeft(table, 'b', 1500), 1500)
+  assert.equal(whatsLeft(table, 'a', 1500), null)
+  assert.equal(whatsLeft(table, 'b', 0), null)
+  assert.equal(whatsLeft(table, 'b', -100), null)
+  assert.equal(whatsLeft([seat('b', false), seat('c', false)], 'b', 900), null)
+  assert.equal(whatsLeft([seat('b', false)], 'b', 900), null)
+})
+
+import { regularsFirst } from '../public/lib/table.js'
+
+test('regulars first: latest night on top, more games break a tie, never-played keep name order', () => {
+  const p = (id) => ({ id, name: id })
+  const roster = [p('Ann'), p('Bo'), p('Cy'), p('Di'), p('Ed')]   // name order, as fetched
+  const n = (playerId, playedOn) => ({ playerId, playedOn })
+  const nights = [
+    n('Cy', '2026-09-01'), n('Cy', '2026-10-10'),
+    n('Ed', '2026-10-10'),
+    n('Bo', '2026-08-01'),
+  ]
+  assert.deepEqual(regularsFirst(roster, nights).map((x) => x.id), ['Cy', 'Ed', 'Bo', 'Ann', 'Di'])
+  assert.deepEqual(regularsFirst(roster, []).map((x) => x.id), ['Ann', 'Bo', 'Cy', 'Di', 'Ed'])
+})
+
+// ---------- round the payments (port of SettlementTest's rounding cases) ----------
+
+import { roundedNets } from '../public/lib/money.js'
+
+test('rounding: whole steps, still adds up, nobody moves a full step', () => {
+  const st = [s('A', 9300), s('B', -4700), s('C', -2850), s('D', -1750)]
+  const r = roundedNets(st, 1000)
+  assert.equal(r.reduce((t, x) => t + x.netCents, 0), 0)
+  for (const [i, x] of r.entries()) {
+    assert.ok(x.netCents % 1000 === 0, `${x.playerId} not a whole step`)
+    assert.ok(Math.abs(x.netCents - st[i].netCents) < 1000, `${x.playerId} moved too far`)
+  }
+  // Every remainder is small here, so one result has to go up a whole step less 300: the tie
+  // (A and B both 300 over) goes to the lower id.
+  assert.deepEqual(r.map((x) => x.netCents), [10000, -5000, -3000, -2000])
+  for (const t of settle(r)) assert.equal(t.amountCents % 1000, 0)
+  assertConserves(r, settle(r))
+})
+
+test('rounding: off, exact multiples, and an unbalanced table are left alone', () => {
+  const st = [s('A', 9300), s('B', -9300)]
+  assert.equal(roundedNets(st, 0), st)
+  assert.deepEqual(roundedNets([s('A', 5000), s('B', -5000)], 1000).map((x) => x.netCents), [5000, -5000])
+  const off = [s('A', 9300), s('B', -9000)]
+  assert.equal(roundedNets(off, 1000), off)
+  // Ties on the remainder go by player id, so every device rounds the same way.
+  assert.deepEqual(roundedNets([s('B', 500), s('A', 500), s('C', -1000)], 1000).map((x) => x.netCents), [0, 1000, -1000])
+})

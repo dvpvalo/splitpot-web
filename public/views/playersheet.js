@@ -5,7 +5,7 @@
 
 import { addEntry, deleteEntry, unseatPlayer } from '../db.js'
 import { formatAmount, formatMoney, minorUnitDigits, parseMoney } from '../lib/money.js'
-import { pileLabel } from '../lib/table.js'
+import { pileLabel, whatsLeft } from '../lib/table.js'
 import { parseInstant, relativeLabel } from '../lib/time.js'
 import { button, clear, clearBanner, el, money, monogram, mount, sheet, showError, showUndo } from '../ui.js'
 
@@ -22,12 +22,14 @@ export function playerSheet(seat, detail, onSaved) {
   const scale = 10 ** digits
   const live = game.status === 'live'
 
-  let mode = 'buyin'
+  // The last player still at the table: open on their cash-out with what's left already in.
+  const left = live ? whatsLeft(detail.seats, seat.gamePlayerId, detail.inPlayCents) : null
+  let mode = left ? 'cashout' : 'buyin'
   // `typed` is always the whole amount, however it got there, so the keypad's backspace edits
   // exactly what is on screen. `pile` is only the chips tapped on top of `base` since the last
   // time the amount was set some other way - it exists to draw the stack and label it.
-  let typed = ''
-  let base = 0
+  let typed = left ? formatAmount(left, currency) : ''
+  let base = left ?? 0
   let pile = []
   let keypadOpen = false
 
@@ -61,6 +63,7 @@ export function playerSheet(seat, detail, onSaved) {
     if (mode === 'cashout') {
       // Cash-outs are usually "everything in front of them", so offer that first.
       const offered = []
+      if (left) offered.push(['What’s left', left])
       if (seat.buyInCents > 0) offered.push(['Their buy-in', seat.buyInCents])
       if (repeat && repeat !== seat.buyInCents) offered.push(['Last buy-in', repeat])
       return offered
@@ -71,7 +74,10 @@ export function playerSheet(seat, detail, onSaved) {
   const draw = () => {
     clear(modes)
     for (const [key, label] of [['buyin', 'Buy-in'], ['cashout', 'Cash-out']]) {
-      const b = button(label, () => { mode = key; setAmount('') },
+      const b = button(label, () => {
+        mode = key
+        setAmount(key === 'cashout' && left ? formatAmount(left, currency) : '')
+      },
         `chip${mode === key ? ' chip-on' : ''}`)
       b.setAttribute('aria-pressed', String(mode === key))
       b.disabled = !live

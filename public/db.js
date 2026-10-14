@@ -3,7 +3,7 @@
 // Same project as the Android app, and every table's RLS keys on auth.uid(), so signing in
 // as the same account IS the linkage. There is no sync layer and nothing to migrate.
 
-import { settle } from './lib/money.js'
+import { roundedNets, settle } from './lib/money.js'
 
 const SUPABASE_URL = 'https://sdslqdlmputkhadbrtnm.supabase.co'
 // Publishable, not secret: `anon` has no table grants at all, so possession of this grants
@@ -334,9 +334,9 @@ export const deleteEntry = (entryId) => authed(() => q(
  * What it CANNOT recover is `paid` ticks, which is exactly why finishing a second time is
  * confirmed with a count of how many it will clear.
  */
-export async function finishGame(gameId) {
+export async function finishGame(gameId, roundStepCents = 0) {
   const detail = await gameDetail(gameId)
-  const transfers = settle(standingsOf(detail))
+  const transfers = settle(roundedNets(standingsOf(detail), roundStepCents))
   return authed(async () => {
     await q(client.from('settlements').delete().eq('game_id', gameId))
     if (transfers.length > 0) {
@@ -416,6 +416,27 @@ export const cancelInvite = (id) => authed(async () => {
  * second tap after a failed seat cannot make a second game; a seat that fails throws, naming
  * who, and the game is already there to seat them by hand.
  */
+/**
+ * A new game today with the same table: same name, stakes, currency and place, the same players
+ * in the same seats. If a seat cannot be written this throws after the game exists, so the
+ * caller says the table is only half set. Port of Repository.sameTableAgain.
+ */
+export async function sameTableAgain(detail) {
+  const old = detail.game
+  const d = new Date()
+  const created = await createGame({
+    name: old.name,
+    gameType: old.game_type ?? 'cash',
+    playedOn: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+    smallBlindCents: old.small_blind_cents,
+    bigBlindCents: old.big_blind_cents,
+    currency: old.currency,
+    location: old.location,
+  })
+  for (const [i, seat] of detail.seats.entries()) await seatPlayer(created.id, seat.player.id, i)
+  return created
+}
+
 export async function startInvite(invite) {
   const me = await profile()
   const day = new Date(invite.starts_at)
@@ -509,6 +530,11 @@ export async function deleteAccount() {
   await authed(() => q(client.rpc('delete_my_account')))
   await client.auth.signOut()
 }
+
+/** Retired = hidden from Add players and invites; every game they played stays as it was. */
+export const setPlayerRetired = (id, retired) => authed(() => q(
+  client.from('players').update({ retired }).eq('id', id),
+))
 
 /** How many games a player has ever been seated in - the delete guard on the roster. */
 export async function playerGameCount(playerId) {

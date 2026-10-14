@@ -936,6 +936,18 @@ a.card:not(.row) { flex-direction: column; gap: 4px; align-items: flex-start; }
 
 .dealer-bar { min-height: 60px; }
 
+/* Pocket lock: a small padlock by the Live tag; locked, the game dims and takes no taps. */
+.btn-lock {
+  flex: none; width: 44px; height: 44px; margin-left: -4px; padding: 0;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  font: inherit; font-weight: 700; cursor: pointer;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation;
+}
+.btn-lock-on { border-color: var(--primary); color: var(--primary); }
+.btn-lock-holding { background: color-mix(in srgb, var(--primary) 25%, var(--surface)); transition: background 600ms linear; }
+.game-locked > :not(.screen-head, .lock-hint) { opacity: 0.6; }
+.lock-hint { margin: 0; color: var(--primary); font-weight: 650; }
+
 /* Dealer's choice: the game being dealt, read across the table, and three steel buttons. */
 .choice-card { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .choice-card .section-label { margin: 0; }

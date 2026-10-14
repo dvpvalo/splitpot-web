@@ -5,17 +5,20 @@
 // banner naming the player and the amount, with Retry; it never fails quietly.
 
 import {
-  addEntry, decideRequest, deleteEntry, deleteGame, finishGame, gameChanges, gameDetail, players,
+  addEntry, decideRequest, deleteEntry, deleteGame, finishGame, gameChanges, gameDetail, hostStats,
+  players, sameTableAgain,
   reopenGame, seatPlayer, setSettlementPaid, shuffleSeats, standingsOf,
 } from '../db.js'
 import {
   advanced, blindsAtLevel, clockLabel, isPaused, newClock, nextLevel,
   paused as pauseClock, remaining, resumed,
 } from '../lib/clock.js'
-import { UPI_ENABLED, formatMoney, settle, upiIdOf, upiLink } from '../lib/money.js'
+import {
+  UPI_ENABLED, formatAmount, formatMoney, parseMoney, roundedNets, settle, upiIdOf, upiLink,
+} from '../lib/money.js'
 import {
   choiceEnabled, clock as storedClock, clockEnabled, dealer as storedDealer, dealerEnabled,
-  forgetGame, games, levelMinutes, saveClock, setDealer, setVariant, variant,
+  forgetGame, games, levelMinutes, roundStepCents, saveClock, setDealer, setVariant, variant,
 } from '../lib/tools.js'
 import { ruleLines, spinPick } from '../lib/variants.js'
 import { durationLabel, longDate, parseInstant, relativeLabel } from '../lib/time.js'
@@ -26,7 +29,8 @@ import {
 import { joinHint, ledgerMessage, ledgerUrl } from '../lib/share.js'
 import qrcode from '../vendor/qrcode.js'
 import {
-  SEAT_H, SEAT_W, rackEdges, seatName, shuffled, stackCheck, stackVerdict, tableLayout,
+  SEAT_H, SEAT_W, rackEdges, regularsFirst, seatName, shuffled, stackCheck, stackVerdict,
+  tableLayout,
 } from '../lib/table.js'
 import { settlementCard } from '../lib/card.js'
 import { playerSheet } from './playersheet.js'
@@ -40,12 +44,13 @@ export function gameView(gameId) {
 
   // Which panel is open lives out here so it survives a repaint. A buy-in arriving from the
   // phone must not throw the host back to Players while they are reading the Timeline.
-  const ui = { showing: 'players' }
+  const ui = { showing: 'players', locked: false }
 
   // Built ONCE, outside load(), and re-mounted on every repaint. A card rebuilt per render
   // would start a new one-second interval each time a buy-in arrived from the phone, and the
   // old ones would keep ticking against detached nodes.
   const clockCard = clockEnabled() ? blindClock(gameId) : null
+  const awake = screenAwake()
 
   const load = async (quiet = false) => {
     if (!quiet) {
@@ -58,14 +63,26 @@ export function gameView(gameId) {
       // Off means ABSENT, not greyed out: a host who never switched the clock on pays no
       // pixels for it. Same rule as the phone.
       if (clockCard && detail.game.status === 'live') clockCard.update(detail)
-      mount(body,
-        header(detail),
-        clockCard && detail.game.status === 'live' ? clockCard : null,
+      awake.set(detail.game.status === 'live')
+      const live = detail.game.status === 'live'
+      if (!live) ui.locked = false
+      const rest = [
+        clockCard && live ? clockCard : null,
         requestsSection(detail, () => load(true)),
         seatSection(detail, () => load(true), ui),
         settlementSection(detail, () => load(true)),
         actionsSection(detail, () => load(true)),
-      )
+      ].filter(Boolean)
+      const hint = el('p', 'lock-hint', 'Locked. Press and hold 🔒 to unlock.')
+      const setLocked = (on) => {
+        ui.locked = on
+        hint.hidden = !on
+        // inert: nothing in there takes a tap or focus, but the page still scrolls and reads.
+        for (const node of rest) node.inert = on
+        body.classList.toggle('game-locked', on)
+      }
+      mount(body, header(detail, live ? lockButton(ui, setLocked) : null), hint, ...rest)
+      setLocked(ui.locked)
     } catch (e) {
       // A failed background refresh must never blank a table that is already on screen and
       // being read at an actual table. The visible numbers stay; the next event retries.
@@ -88,6 +105,7 @@ export function gameView(gameId) {
   root.destroy = () => {
     clearTimeout(timer)
     clockCard?.stop()
+    awake.set(false)
     unsubscribe()
   }
 
@@ -95,14 +113,93 @@ export function gameView(gameId) {
   return root
 }
 
-function header({ game }) {
+/**
+ * A live game keeps the screen on, like the phone app: it is read and tapped all night, and
+ * every lock is an unlock with cards in the other hand. The browser drops the lock whenever the
+ * tab is hidden, so it is taken again on the way back. Where Wake Lock is missing (older
+ * Safari) or refused, the screen simply sleeps as before.
+ */
+function screenAwake() {
+  let want = false
+  let lock = null
+  const take = async () => {
+    if (!want || lock || document.visibilityState !== 'visible' || !navigator.wakeLock) return
+    try {
+      lock = await navigator.wakeLock.request('screen')
+      lock.addEventListener('release', () => { lock = null })
+      if (!want) lock.release()
+    } catch { /* refused: the screen sleeps as it always did */ }
+  }
+  const onVisible = () => take()
+  return {
+    set(on) {
+      if (on === want) return
+      want = on
+      if (on) {
+        document.addEventListener('visibilitychange', onVisible)
+        take()
+      } else {
+        document.removeEventListener('visibilitychange', onVisible)
+        lock?.release()
+      }
+    },
+  }
+}
+
+/**
+ * Pocket lock: for when the phone goes round the table. One tap locks every control on the
+ * game; holding the button for half a second unlocks it, which a stray thumb does not do.
+ */
+function lockButton(ui, setLocked) {
+  const b = button('', null, 'btn-lock')
+  const draw = () => {
+    b.textContent = ui.locked ? '🔒' : '🔓'
+    b.setAttribute('aria-label', ui.locked ? 'Locked. Press and hold to unlock' : 'Lock the table')
+    b.classList.toggle('btn-lock-on', ui.locked)
+  }
+  let timer = null
+  // Releasing the hold fires a click (Enter repeats them while held): without this the very
+  // same press that unlocked would lock again. Cleared once the finger or key comes up.
+  let justUnlocked = false
+  const stop = () => {
+    clearTimeout(timer)
+    timer = null
+    b.classList.remove('btn-lock-holding')
+    if (justUnlocked) setTimeout(() => { justUnlocked = false }, 0)
+  }
+  const hold = (e) => {
+    if (!ui.locked || timer) return
+    e.preventDefault()
+    b.classList.add('btn-lock-holding')
+    timer = setTimeout(() => {
+      timer = null
+      b.classList.remove('btn-lock-holding')
+      justUnlocked = true
+      setLocked(false)
+      draw()
+    }, 600)
+  }
+  b.addEventListener('click', () => {
+    if (justUnlocked || ui.locked) return
+    setLocked(true)
+    draw()
+  })
+  b.addEventListener('pointerdown', hold)
+  b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') hold(e) })
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel', 'keyup']) b.addEventListener(ev, stop)
+  b.addEventListener('contextmenu', (e) => e.preventDefault())
+  draw()
+  return b
+}
+
+function header({ game }, lock) {
   const head = el('header', 'screen-head')
   const left = el('div')
   mount(left,
     el('h1', 'title', game.name),
     el('p', 'row-sub', longDate(game.played_on) + (game.location ? ` · ${game.location}` : '')),
   )
-  mount(head, left, el('span', `tag tag-${game.status}`, game.status === 'live' ? 'Live' : 'Settled'))
+  mount(head, left, el('span', `tag tag-${game.status}`, game.status === 'live' ? 'Live' : 'Settled'), lock)
   return head
 }
 
@@ -686,6 +783,12 @@ function settlementSection(detail, reload) {
     live ? 'Current settlement · live preview' : 'Settlement'))
 
   const rows = live ? previewRows(detail) : storedRows(detail)
+  // Said out loud, so nobody wonders why a ₹93 result pays ₹90.
+  const step = live ? roundStepCents(detail.game.currency) : 0
+  if (step > 0 && rows.length > 0) {
+    wrap.appendChild(el('p', 'muted small',
+      `Rounded to ${formatMoney(step, detail.game.currency)}: each result moves by less than that. Change it in Settings.`))
+  }
 
   if (rows.length === 0) {
     wrap.appendChild(el('p', 'muted', "Nothing to settle — everyone's square."))
@@ -761,7 +864,7 @@ function alreadyPaid(detail) {
 }
 
 /** The live preview runs the SAME settle() that finishing the game will commit. */
-const previewRows = (detail) => settle(standingsOf(detail))
+const previewRows = (detail) => settle(roundedNets(standingsOf(detail), roundStepCents(detail.game.currency)))
   .map((t) => ({ ...t, paid: false }))
 
 function storedRows(detail) {
@@ -820,7 +923,7 @@ function actionsSection(detail, reload) {
       finish.textContent = 'Settling...'
       clearBanner()
       try {
-        await finishGame(game.id)
+        await finishGame(game.id, roundStepCents(game.currency))
         await reload()
       } catch (e) {
         finish.disabled = false
@@ -829,6 +932,10 @@ function actionsSection(detail, reload) {
       }
     }, 'btn btn-primary')
     wrap.appendChild(finish)
+    // End of the night: everyone still at the table, one after another, on one screen.
+    if (detail.seats.some((s) => !s.hasCashedOut)) {
+      wrap.appendChild(button('Cash-out round', () => cashOutRound(detail, reload), 'btn'))
+    }
 
     if (game.ledger_slug) wrap.appendChild(button('Show join QR', () => joinSheet(game), 'btn'))
 
@@ -848,6 +955,23 @@ function actionsSection(detail, reload) {
       wrap.appendChild(shuffle)
     }
   } else {
+    // Most weeks it is the same people: tonight's game in one tap.
+    if (detail.seats.length > 0) {
+      const again = button('Same table again', async () => {
+        const n = detail.seats.length
+        if (!confirm(`Start a new "${game.name}" today with the same ${n} ${n === 1 ? 'player' : 'players'} in the same seats?`)) return
+        again.disabled = true
+        clearBanner()
+        try {
+          const created = await sameTableAgain(detail)
+          location.hash = `#/game/${created.id}`
+        } catch (e) {
+          again.disabled = false
+          showError(`The new game was NOT fully set up: ${e.message ?? e}`)
+        }
+      }, 'btn btn-primary')
+      wrap.appendChild(again)
+    }
     const reopen = button('Reopen this game', async () => {
       const note = paidCount > 0
         ? `\n\nThe ${paidCount} paid ${paidCount === 1 ? 'tick survives' : 'ticks survive'} `
@@ -908,6 +1032,80 @@ function actionsSection(detail, reload) {
  * The QR players scan to open the live ledger, and the short code for anyone who would rather
  * type. Dark on white whatever the theme: a camera needs the contrast.
  */
+/**
+ * Cash-out round: every seat that has not cashed out, in seat order, on one sheet. Type a stack,
+ * Save & next; Skip leaves someone for later. The last one is pre-filled with what is left on the
+ * table, as the player sheet does. Each save is its own money write, and a failure stays on the
+ * sheet with the amount still typed, so nothing is lost and nothing is silent.
+ */
+function cashOutRound(detail, reload) {
+  const { game } = detail
+  const cur = game.currency
+  const queue = detail.seats.filter((s) => !s.hasCashedOut)
+  let at = 0
+  let left = detail.inPlayCents
+  let skipped = 0
+  let saved = 0
+
+  const body = el('div', 'stack-tight')
+  const dlg = sheet('Cash-out round', body)
+  dlg.addEventListener('close', () => { if (saved > 0) reload() })
+
+  const draw = () => {
+    clear(body)
+    if (at >= queue.length) {
+      mount(body,
+        el('p', 'row-title', saved === 0 ? 'Nothing logged.' : `${saved} cash-out${saved === 1 ? '' : 's'} logged.`),
+        el('p', 'row-sub', `Left on the table: ${formatMoney(left, cur)}`),
+        button('Done', () => dlg.close(), 'btn btn-primary'))
+      return
+    }
+    const seat = queue[at]
+    const last = at === queue.length - 1 && skipped === 0 && left > 0
+    const input = el('input', 'field round-amount')
+    input.inputMode = 'decimal'
+    input.placeholder = '0'
+    input.setAttribute('aria-label', `${seat.player.name}'s stack`)
+    if (last) input.value = formatAmount(left, cur)
+    const error = el('p', 'stack-off')
+    error.hidden = true
+
+    const next = button('Save & next', async () => {
+      const cents = parseMoney(input.value, cur)
+      if (cents == null || cents < 0) { input.focus(); return }
+      next.disabled = true
+      skip.disabled = true
+      try {
+        if (cents > 0) {
+          await addEntry({ gameId: game.id, gamePlayerId: seat.gamePlayerId, kind: 'cashout', amountCents: cents })
+          saved++
+          left -= cents
+        }
+        at++
+        draw()
+      } catch (e) {
+        next.disabled = false
+        skip.disabled = false
+        error.textContent = `${seat.player.name}'s cash-out of ${formatMoney(cents, cur)} was NOT saved: ${e.message ?? e}`
+        error.hidden = false
+      }
+    }, 'btn btn-primary')
+    const skip = button('Skip for now', () => { skipped++; at++; draw() }, 'btn-link')
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') next.click() })
+
+    const head = el('div', 'row')
+    const main = el('div', 'row-main')
+    mount(main, el('h3', 'row-title', seat.player.name),
+      el('p', 'row-sub', `${at + 1} of ${queue.length} · bought in ${formatMoney(seat.buyInCents, cur)}`))
+    mount(head, monogram(seat.player), main)
+    mount(body, head, input,
+      el('p', 'row-sub', last ? 'What\u2019s left on the table, filled in.' : `Left on the table: ${formatMoney(left, cur)}`),
+      error, next, skip)
+    input.focus()
+  }
+  draw()
+}
+
 function joinSheet(game) {
   const qr = qrcode(0, 'M')
   qr.addData(ledgerUrl({ ledgerSlug: game.ledger_slug }))
@@ -1004,9 +1202,11 @@ async function seatSheet(detail, reload) {
   const dlg = sheet('Add players', body)
   body.appendChild(el('p', 'muted', 'Loading...'))
   try {
-    const roster = await players()
+    // Regulars first. The nights only order the list: if they fail, the roster still comes.
+    const [all, stats] = await Promise.all([players(), hostStats().catch(() => ({ nights: [] }))])
+    const roster = regularsFirst(all, stats.nights)
     const seated = new Set(detail.seats.map((s) => s.player.id))
-    const free = roster.filter((p) => !seated.has(p.id))
+    const free = roster.filter((p) => !seated.has(p.id) && !p.retired)
     clear(body)
     if (free.length === 0) {
       body.appendChild(el('p', 'muted', 'Everyone in your list is already at this table.'))

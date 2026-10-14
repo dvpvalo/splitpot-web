@@ -12,6 +12,7 @@
 // the tests. This file only reads and writes.
 
 import { DEFAULT_LEVEL_MINUTES, parse, serialise } from './clock.js'
+import { ROUND_CHOICES, minorUnitDigits } from './money.js'
 import { parseGames } from './variants.js'
 
 const KEYS = {
@@ -20,6 +21,7 @@ const KEYS = {
   levelMinutes: 'splitpot_tools_level_minutes',
   choiceOn: 'splitpot_tools_choice_on',
   games: 'splitpot_tools_games',
+  roundTo: 'splitpot_round_to',
 }
 
 // Every access is wrapped: Safari in private mode THROWS on localStorage rather than
@@ -58,6 +60,15 @@ export function levelMinutes() {
 }
 
 export const setLevelMinutes = (minutes) => write(KEYS.levelMinutes, String(minutes))
+
+/** Settle-up rounding in whole currency units: 0 (exact, the default), 10 or 50. */
+export function roundTo() {
+  const n = Number(read(KEYS.roundTo))
+  return ROUND_CHOICES.includes(n) ? n : 0
+}
+export const setRoundTo = (n) => write(KEYS.roundTo, String(n))
+/** The rounding step for a game, in its minor units. */
+export const roundStepCents = (currency) => roundTo() * 10 ** minorUnitDigits(currency)
 
 export const choiceEnabled = () => read(KEYS.choiceOn) === 'true'
 export const setChoiceEnabled = (on) => write(KEYS.choiceOn, String(on))

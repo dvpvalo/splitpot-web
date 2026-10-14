@@ -1,7 +1,9 @@
 // People: the leaderboard, the season chips above it, the records sheet behind each row, and
 // the contact book underneath. Players and leaderboard are one screen here, as on the phone.
 
-import { addPlayer, deletePlayer, hostStats, playerGameCount, players, setPlayerCard, updatePlayer } from '../db.js'
+import {
+  addPlayer, deletePlayer, hostStats, playerGameCount, players, setPlayerCard, setPlayerRetired, updatePlayer,
+} from '../db.js'
 import { UPI_ENABLED, formatMoney, isUpiId } from '../lib/money.js'
 import { recordsFor, seasonsIn, standingsFor, streakLabel } from '../lib/stats.js'
 import { shortDate } from '../lib/time.js'
@@ -162,8 +164,7 @@ function contactBook(roster, reload) {
   if (roster.length === 0) {
     wrap.appendChild(el('p', 'muted', 'Nobody yet. Add the people you play with.'))
   } else {
-    const list = el('div', 'list')
-    for (const p of roster) {
+    const rowFor = (p) => {
       const row = el('button', 'row row-tappable')
       row.type = 'button'
       const main = el('div', 'row-main')
@@ -173,9 +174,17 @@ function contactBook(roster, reload) {
       }
       mount(row, monogram(p), main)
       row.addEventListener('click', () => playerEditSheet(p, reload))
-      list.appendChild(row)
+      return row
     }
-    wrap.appendChild(list)
+    const active = roster.filter((p) => !p.retired)
+    const retired = roster.filter((p) => p.retired)
+    wrap.appendChild(mount(el('div', 'list'), ...active.map(rowFor)))
+    // Retired players stay in the book, out of the way, so they can be brought back.
+    if (retired.length > 0) {
+      mount(wrap, el('h2', 'section-label', 'Retired'),
+        el('p', 'muted small', 'Not offered in Add players or invites. Their games stay.'),
+        mount(el('div', 'list'), ...retired.map(rowFor)))
+    }
   }
 
   wrap.appendChild(button('Add a player', () => playerEditSheet(null, reload), 'btn'))
@@ -390,6 +399,7 @@ function removePlayer(player, reload, close) {
         note.textContent = `${player.name} has played ${games} `
           + `${games === 1 ? 'game' : 'games'}. Deleting them would remove them from those `
           + 'games too, so it is blocked.'
+          + (player.retired ? '' : ' Retire them instead to stop offering them.')
         return
       }
       note.textContent = ''
@@ -406,7 +416,23 @@ function removePlayer(player, reload, close) {
     }
   }, 'btn-link btn-danger')
 
-  return mount(wrap, btn, note)
+  // Retire: off the pickers, nothing else changes. Easy both ways, so no confirm.
+  const retire = button(player.retired ? 'Bring back' : 'Retire', async () => {
+    retire.disabled = true
+    clearBanner()
+    try {
+      await setPlayerRetired(player.id, !player.retired)
+      close()
+      await reload()
+    } catch (e) {
+      retire.disabled = false
+      showError(`${player.name} was NOT ${player.retired ? 'brought back' : 'retired'}: ${e.message ?? e}`)
+    }
+  }, 'btn')
+  if (player.is_self) return mount(wrap, btn, note)
+  return mount(wrap, retire, el('p', 'muted small', player.retired
+    ? 'Retired: not offered in Add players or invites.'
+    : 'Stopped coming? Retire them: off Add players and invites, every game they played stays.'), btn, note)
 }
 
 function field(label, input) {

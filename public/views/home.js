@@ -262,7 +262,8 @@ async function repliesSheet(invite, reload) {
   clear(body)
   const answerOf = new Map((invite.invite_replies ?? []).map((r) => [r.player_id, r.answer]))
   for (const [answer, label] of [['in', 'In'], ['maybe', 'Maybe'], ['out', 'Out'], [undefined, 'No reply yet']]) {
-    const names = roster.filter((p) => answerOf.get(p.id) === answer).map((p) => p.name)
+    // Retired players are not invited, so they are not "no reply yet" either.
+    const names = roster.filter((p) => answerOf.get(p.id) === answer && (answer || !p.retired)).map((p) => p.name)
     if (names.length === 0) continue
     mount(body, el('h3', 'section-label', `${label} · ${names.length}`), el('p', null, names.join(', ')))
   }

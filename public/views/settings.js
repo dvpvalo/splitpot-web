@@ -4,11 +4,11 @@
 import { signOut } from '../auth.js'
 import { deleteAccount, profile, saveProfile, setPublicHistory } from '../db.js'
 import { LEVEL_CHOICES } from '../lib/clock.js'
-import { formatAmount, parseMoney } from '../lib/money.js'
+import { ROUND_CHOICES, formatAmount, parseMoney } from '../lib/money.js'
 import { historyMessage, historyUrl } from '../lib/share.js'
 import {
-  choiceEnabled, clockEnabled, dealerEnabled, games, levelMinutes, saveGames, setChoiceEnabled,
-  setClockEnabled, setDealerEnabled, setLevelMinutes,
+  choiceEnabled, clockEnabled, dealerEnabled, games, levelMinutes, roundTo, saveGames,
+  setChoiceEnabled, setClockEnabled, setDealerEnabled, setLevelMinutes, setRoundTo,
 } from '../lib/tools.js'
 import { NAME_MAX, RULES_MAX, removeGame, upsertGame } from '../lib/variants.js'
 import { THEMES, apply as applyTheme, current as currentTheme } from '../theme.js'
@@ -155,6 +155,19 @@ function toolsCard() {
   }
   drawLevels()
 
+  const roundChips = el('div', 'chips')
+  const drawRound = () => {
+    clear(roundChips)
+    for (const n of ROUND_CHOICES) {
+      const on = n === roundTo()
+      const chip = button(n === 0 ? 'Exact' : `Nearest ${n}`, () => { setRoundTo(n); drawRound() },
+        `chip${on ? ' chip-on' : ''}`)
+      chip.setAttribute('aria-pressed', String(on))
+      roundChips.appendChild(chip)
+    }
+  }
+  drawRound()
+
   const gamesWrap = gamesList()
   gamesWrap.hidden = !choiceEnabled()
 
@@ -179,6 +192,10 @@ function toolsCard() {
       gamesWrap.hidden = !on
     }),
     gamesWrap,
+    el('h3', 'section-label', 'Round the payments'),
+    roundChips,
+    el('p', 'muted small', 'Settle up in whole 10s or 50s, so nobody pays 93. It still adds up; '
+      + 'each result moves by less than the step. Applies when a game is finished.'),
   )
 }
 

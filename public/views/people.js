@@ -2,7 +2,8 @@
 // the contact book underneath. Players and leaderboard are one screen here, as on the phone.
 
 import {
-  addPlayer, deletePlayer, hostStats, playerGameCount, players, setPlayerCard, setPlayerRetired, updatePlayer,
+  addPlayer, deletePlayer, hostStats, mergePlayers, playerGameCount, players, setPlayerCard, setPlayerRetired,
+  updatePlayer,
 } from '../db.js'
 import { UPI_ENABLED, formatMoney, isUpiId } from '../lib/money.js'
 import { recordsFor, seasonsIn, standingsFor, streakLabel } from '../lib/stats.js'
@@ -304,6 +305,9 @@ function playerEditSheet(existing, reload) {
   )
   if (existing) body.appendChild(cardSection(existing, reload))
   if (existing) body.appendChild(removePlayer(existing, reload, () => dlg.close()))
+  if (existing && !existing.is_self) {
+    body.appendChild(button('Same person as…', () => mergeSheet(existing, reload, () => dlg.close()), 'btn-link'))
+  }
 
   const dlg = sheet(existing ? `Edit ${existing.name}` : 'Add a player', body)
   return dlg
@@ -433,6 +437,55 @@ function removePlayer(player, reload, close) {
   return mount(wrap, retire, el('p', 'muted small', player.retired
     ? 'Retired: not offered in Add players or invites.'
     : 'Stopped coming? Retire them: off Add players and invites, every game they played stays.'), btn, note)
+}
+
+/**
+ * Merge a duplicate ("Soham A.") into the real one ("Soham"): pick who they really are, confirm,
+ * and every game of the duplicate becomes theirs. Can't be undone, so it always asks.
+ */
+async function mergeSheet(drop, reload, closeEditor) {
+  const body = el('div', 'sheet-body')
+  const dlg = sheet(`${drop.name} is really…`, body)
+  body.appendChild(el('p', 'muted', 'Loading…'))
+  let roster
+  try {
+    roster = (await players()).filter((p) => p.id !== drop.id)
+  } catch (e) {
+    dlg.close()
+    showError(`Could not load your players: ${e.message ?? e}`)
+    return
+  }
+  clear(body)
+  body.appendChild(el('p', 'muted small',
+    `Pick who ${drop.name} really is. Every game, buy-in and payment of ${drop.name} moves to them.`))
+  const list = el('div', 'list')
+  for (const keep of roster) {
+    const row = el('button', 'row row-tappable')
+    row.type = 'button'
+    const main = el('div', 'row-main')
+    main.appendChild(el('h3', 'row-title', keep.name + (keep.is_self ? ' (you)' : '')))
+    mount(row, monogram(keep), main)
+    row.addEventListener('click', async () => {
+      if (!confirm(`Merge ${drop.name} into ${keep.name}?
+
+`
+        + `Every game, buy-in and payment of ${drop.name} becomes ${keep.name}'s, and `
+        + `${drop.name} leaves your list. This can't be undone.`)) return
+      row.disabled = true
+      clearBanner()
+      try {
+        await mergePlayers(keep.id, drop.id)
+        dlg.close()
+        closeEditor()
+        await reload()
+      } catch (e) {
+        row.disabled = false
+        showError(`${drop.name} was NOT merged: ${e.message ?? e}`)
+      }
+    })
+    list.appendChild(row)
+  }
+  body.appendChild(list)
 }
 
 function field(label, input) {

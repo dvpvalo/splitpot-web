@@ -536,6 +536,14 @@ export const setPlayerRetired = (id, retired) => authed(() => q(
   client.from('players').update({ retired }).eq('id', id),
 ))
 
+/**
+ * Two rows for one person: every game, buy-in, payment and invite answer of `dropId` becomes
+ * `keepId`'s, then `dropId` is deleted. One transaction in `merge_players`, so it is all or none.
+ */
+export const mergePlayers = (keepId, dropId) => authed(() => q(
+  client.rpc('merge_players', { p_keep: keepId, p_drop: dropId }),
+))
+
 /** How many games a player has ever been seated in - the delete guard on the roster. */
 export async function playerGameCount(playerId) {
   const rows = await authed(() => q(

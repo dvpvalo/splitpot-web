@@ -1082,3 +1082,43 @@ test('season race: running totals game by game, top first, one colour each all t
   assert.deepEqual([raceAt(0, 5), raceAt(450, 5), raceAt(1000, 5), raceAt(1200, 5), raceAt(6100, 5)], [0, 0.5, 1, 1, 5])
   assert.equal(raceDuration(5), 8000)
 })
+
+// ---------- dealer's choice (port of VariantsTest.kt) ----------
+
+import {
+  DEFAULT_GAMES, parseGames, removeGame, ruleLines, spinPick, upsertGame,
+} from '../public/lib/variants.js'
+
+test('games: nothing stored or junk stored reads as the defaults, an emptied list stays empty', () => {
+  assert.deepEqual(parseGames(null), DEFAULT_GAMES)
+  assert.deepEqual(parseGames('{oops'), DEFAULT_GAMES)
+  assert.deepEqual(parseGames('{"name":"PLO"}'), DEFAULT_GAMES)
+  assert.deepEqual(parseGames('[]'), [])
+  assert.deepEqual(parseGames('[{"name":"  Fruits "},{"name":""},{"rules":"x"},null]'),
+    [{ name: 'Fruits', rules: '' }])
+})
+
+test('games: edit in place, add at the end, a rename never leaves a name twice', () => {
+  const list = [{ name: 'PLO', rules: '' }, { name: 'Fruits', rules: '' }, { name: 'Saddam', rules: '' }]
+  assert.deepEqual(upsertGame(list, 'fruits', { name: 'Fruits', rules: 'a' }).map((g) => g.rules), ['', 'a', ''])
+  assert.deepEqual(upsertGame(list, null, { name: ' Big O ', rules: '' }).map((g) => g.name),
+    ['PLO', 'Fruits', 'Saddam', 'Big O'])
+  assert.deepEqual(upsertGame(list, 'Fruits', { name: 'saddam', rules: '' }).map((g) => g.name), ['PLO', 'saddam'])
+  assert.deepEqual(removeGame(list, 'FRUITS').map((g) => g.name), ['PLO', 'Saddam'])
+})
+
+test('games: a spin never lands on the game being played, unless it is the only one', () => {
+  const names = ['A', 'B', 'C']
+  for (const r of [0, 0.34, 0.5, 0.99, 1]) assert.notEqual(spinPick(names, 'B', () => r), 'B')
+  assert.equal(spinPick(['A'], 'A', () => 0.5), 'A')
+  assert.equal(spinPick([], null), null)
+  assert.equal(spinPick(names, null, () => 0.99), 'C')
+})
+
+test('games: rules split one per line, blanks and typed bullets dropped', () => {
+  assert.deepEqual(ruleLines('- one\n\n  • two  \n*three\n'), ['one', 'two', 'three'])
+  assert.deepEqual(ruleLines(''), [])
+  // Every built-in has rules except the house games, which are the host's to write.
+  const blank = DEFAULT_GAMES.filter((g) => ruleLines(g.rules).length === 0).map((g) => g.name)
+  assert.deepEqual(blank, ['3 Patti poker', 'Fruits', 'Saddam'])
+})

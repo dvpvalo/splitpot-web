@@ -14,9 +14,10 @@ import {
 } from '../lib/clock.js'
 import { UPI_ENABLED, formatMoney, settle, upiIdOf, upiLink } from '../lib/money.js'
 import {
-  clock as storedClock, clockEnabled, dealer as storedDealer, dealerEnabled, forgetGame,
-  levelMinutes, saveClock, setDealer,
+  choiceEnabled, clock as storedClock, clockEnabled, dealer as storedDealer, dealerEnabled,
+  forgetGame, games, levelMinutes, saveClock, setDealer, setVariant, variant,
 } from '../lib/tools.js'
+import { ruleLines, spinPick } from '../lib/variants.js'
 import { durationLabel, longDate, parseInstant, relativeLabel } from '../lib/time.js'
 import {
   button, clear, clearBanner, el, money, monogram, mount, payLink, sheet, showError, showNotice,
@@ -270,6 +271,7 @@ function seatSection(detail, reload, ui) {
     }
 
     clear(tableWrap)
+    if (choiceEnabled() && detail.game.status === 'live') tableWrap.appendChild(choiceCard(detail, draw))
     const showDealer = dealerEnabled() && detail.game.status === 'live' && detail.seats.length > 0
     const holder = showDealer ? storedDealer(detail.game.id) : null
     tableWrap.appendChild(ovalTable(detail, reload, holder))
@@ -443,6 +445,86 @@ function dealerRow(detail, redraw) {
   }, 'btn-rebuy')
 
   return mount(row, main, pass)
+}
+
+/**
+ * Dealer's choice: what is being dealt now, whose call it is, and three buttons - Spin for a
+ * random game, Pick to choose one, Rules for the argument. Whose call comes from the dealer
+ * button when that is on; nothing is asked twice.
+ *
+ * Local to this browser, like the dealer button: it is about the room, not the money.
+ */
+function choiceCard(detail, redraw) {
+  const gameId = detail.game.id
+  const list = games()
+  const names = list.map((g) => g.name)
+  const current = variant(gameId)
+  const holder = dealerEnabled()
+    ? detail.seats.find((s) => s.gamePlayerId === storedDealer(gameId)) ?? null
+    : null
+
+  const card = el('section', 'card choice-card')
+  const label = el('h3', 'section-label', holder
+    ? `Dealer’s choice · ${seatName(holder.player.name)}’s call`
+    : 'Dealer’s choice')
+  if (names.length === 0) {
+    return mount(card, label, el('p', 'row-sub', 'No games on your list. Add them in Settings → Table tools.'))
+  }
+  const title = el('p', 'choice-game', current ?? 'Nothing picked yet')
+  title.setAttribute('aria-live', 'polite')
+
+  const pick = (name) => { setVariant(gameId, name); redraw() }
+  const spinBtn = button('Spin', () => {
+    const landed = spinPick(names, current)
+    if (names.length < 2 || matchMedia('(prefers-reduced-motion: reduce)').matches) { pick(landed); return }
+    // A second of names flicking past, then the pick. Buttons off so a second tap cannot race it.
+    for (const b of actions.children) b.disabled = true
+    let i = 0
+    const tick = setInterval(() => {
+      title.textContent = names[i++ % names.length]
+      if (i < 14) return
+      clearInterval(tick)
+      pick(landed)
+    }, 70)
+  }, 'btn-rebuy')
+  const pickBtn = button('Pick', () => {
+    const grid = el('div', 'chips chips-wrap')
+    const dlg = sheet('Pick a game', grid)
+    for (const name of names) {
+      const chip = button(name, () => { dlg.close(); pick(name) }, `chip${name === current ? ' chip-on' : ''}`)
+      chip.setAttribute('aria-pressed', String(name === current))
+      grid.appendChild(chip)
+    }
+  }, 'btn-rebuy')
+  const rulesBtn = button('Rules', () => rulesSheet(list, current), 'btn-rebuy')
+  const actions = el('div', 'choice-actions')
+  mount(actions, spinBtn, pickBtn, rulesBtn)
+  return mount(card, label, title, actions)
+}
+
+/** Every game's rules, one at a time, opening on the game being dealt. */
+function rulesSheet(list, current) {
+  const tabs = el('div', 'chips chips-wrap')
+  const body = el('div', 'stack-tight')
+  const show = (name) => {
+    clear(tabs)
+    for (const g of list) {
+      const chip = button(g.name, () => show(g.name), `chip${g.name === name ? ' chip-on' : ''}`)
+      chip.setAttribute('aria-pressed', String(g.name === name))
+      tabs.appendChild(chip)
+    }
+    clear(body)
+    const lines = ruleLines(list.find((g) => g.name === name)?.rules ?? '')
+    if (lines.length === 0) {
+      body.appendChild(el('p', 'muted', 'No rules written down yet. Add your house rules in Settings → Table tools.'))
+      return
+    }
+    const ul = el('ul', 'rules')
+    for (const line of lines) ul.appendChild(el('li', null, line))
+    body.appendChild(ul)
+  }
+  show(list.some((g) => g.name === current) ? current : list[0].name)
+  sheet('Rules', tabs, body)
 }
 
 /**

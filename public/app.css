@@ -936,6 +936,16 @@ a.card:not(.row) { flex-direction: column; gap: 4px; align-items: flex-start; }
 
 .dealer-bar { min-height: 60px; }
 
+/* Dealer's choice: the game being dealt, read across the table, and three steel buttons. */
+.choice-card { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.choice-card .section-label { margin: 0; }
+.choice-game { margin: 0; font-family: var(--serif); font-size: 1.75rem; font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; }
+.choice-actions { display: flex; gap: 8px; margin-top: 4px; }
+.choice-actions .btn-rebuy { flex: 1; margin: 0; }
+.chips-wrap { flex-wrap: wrap; overflow: visible; }
+.rules { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; line-height: 1.45; }
+textarea.field { min-height: 180px; resize: vertical; line-height: 1.45; }
+
 /* Add players: a list you tick through, seated as you tap. */
 .seat-pick-status { flex: none; font-size: 0.875rem; font-weight: 700; color: var(--muted); }
 .seat-pick:disabled { cursor: default; }

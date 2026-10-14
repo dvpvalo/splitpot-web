@@ -7,10 +7,14 @@ import { LEVEL_CHOICES } from '../lib/clock.js'
 import { formatAmount, parseMoney } from '../lib/money.js'
 import { historyMessage, historyUrl } from '../lib/share.js'
 import {
-  clockEnabled, dealerEnabled, levelMinutes, setClockEnabled, setDealerEnabled, setLevelMinutes,
+  choiceEnabled, clockEnabled, dealerEnabled, games, levelMinutes, saveGames, setChoiceEnabled,
+  setClockEnabled, setDealerEnabled, setLevelMinutes,
 } from '../lib/tools.js'
+import { NAME_MAX, RULES_MAX, removeGame, upsertGame } from '../lib/variants.js'
 import { THEMES, apply as applyTheme, current as currentTheme } from '../theme.js'
-import { button, clear, clearBanner, el, mount, screenTitle, showError, showNotice } from '../ui.js'
+import {
+  button, clear, clearBanner, el, mount, screenTitle, sheet, showError, showNotice,
+} from '../ui.js'
 
 const CURRENCIES = ['GBP', 'INR', 'USD', 'EUR', 'AUD', 'CAD', 'JPY', 'ZAR']
 
@@ -127,7 +131,7 @@ function profileCard(me) {
 // ---------- table tools ----------
 
 /**
- * The two things that can sit on the live table. Both start OFF, and off means ABSENT - the
+ * The things that can sit on the live table. All start OFF, and off means ABSENT - the
  * table renders exactly as it did before them, with no greyed-out control and no placeholder
  * row. A feature nobody switched on costs them no pixels.
  *
@@ -151,13 +155,16 @@ function toolsCard() {
   }
   drawLevels()
 
+  const gamesWrap = gamesList()
+  gamesWrap.hidden = !choiceEnabled()
+
   const levelWrap = el('div', 'stack-tight')
   mount(levelWrap, el('p', 'muted small', 'Minutes per level'), levels)
   levelWrap.hidden = !clockEnabled()
 
   return mount(wrap,
     el('h2', 'section-label', 'Table tools'),
-    el('p', 'muted small', 'Both off by default. Off means they are not on the table at all.'),
+    el('p', 'muted small', 'All off by default. Off means they are not on the table at all.'),
     toggle('Blind clock', 'Counts down the level and doubles the blinds from this game\u2019s '
       + 'own stakes.', clockEnabled, (on) => {
       setClockEnabled(on)
@@ -166,7 +173,62 @@ function toolsCard() {
     levelWrap,
     toggle('Dealer button', 'Shows who deals next, and moves round the table with one tap.',
       dealerEnabled, setDealerEnabled),
+    toggle('Dealer’s choice', 'Shows the game being dealt, spins or picks the next one, '
+      + 'and keeps the rules a tap away.', choiceEnabled, (on) => {
+      setChoiceEnabled(on)
+      gamesWrap.hidden = !on
+    }),
+    gamesWrap,
   )
+}
+
+/** The group's games: tap one to edit its rules, or add a house game. */
+function gamesList() {
+  const wrap = el('div', 'stack-tight')
+  const chips = el('div', 'chips chips-wrap')
+  const draw = () => {
+    clear(chips)
+    for (const g of games()) chips.appendChild(button(g.name, () => gameEditor(g, draw), 'chip'))
+    chips.appendChild(button('+ Add a game', () => gameEditor(null, draw), 'chip'))
+  }
+  draw()
+  return mount(wrap, el('p', 'muted small', 'Your games. Tap one to write your house rules, one per line.'), chips)
+}
+
+function gameEditor(game, done) {
+  const name = el('input', 'field')
+  name.maxLength = NAME_MAX
+  name.value = game?.name ?? ''
+  name.placeholder = 'e.g. Fruits'
+  const rules = el('textarea', 'field')
+  rules.maxLength = RULES_MAX
+  rules.value = game?.rules ?? ''
+  rules.placeholder = 'One rule per line'
+  const labelled = (text, input) => mount(el('label', 'field-wrap'), el('span', 'field-label', text), input)
+
+  const save = button('Save', () => {
+    const typed = name.value.trim()
+    if (!typed) { name.focus(); return }
+    const list = games()
+    const clash = list.find((g) => g.name.toLowerCase() === typed.toLowerCase()
+      && g.name.toLowerCase() !== (game?.name ?? '').toLowerCase())
+    if (clash) { clashNote.textContent = `${clash.name} is already on your list.`; clashNote.hidden = false; return }
+    saveGames(upsertGame(list, game?.name ?? null, { name: typed, rules: rules.value }))
+    dlg.close()
+    done()
+  }, 'btn btn-primary')
+  const remove = game && button('Remove from the list', () => {
+    if (!confirm(`Remove ${game.name} and its rules?`)) return
+    saveGames(removeGame(games(), game.name))
+    dlg.close()
+    done()
+  }, 'btn btn-danger')
+
+  const clashNote = el('p', 'stack-off')
+  clashNote.hidden = true
+  const body = el('div', 'stack-tight')
+  mount(body, labelled('Name', name), labelled('Rules', rules), clashNote, save, remove)
+  const dlg = sheet(game ? game.name : 'Add a game', body)
 }
 
 /**

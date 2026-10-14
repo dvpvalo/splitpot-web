@@ -1,4 +1,4 @@
-// Storage half of data/TableTools.kt: the two optional things that can sit on the live table.
+// Storage half of data/TableTools.kt: the optional things that can sit on the live table.
 //
 // Both are OFF until switched on in Settings, and while off the table renders exactly as it
 // did before them. Nobody pays screen space for a feature they never turned on.
@@ -12,11 +12,14 @@
 // the tests. This file only reads and writes.
 
 import { DEFAULT_LEVEL_MINUTES, parse, serialise } from './clock.js'
+import { parseGames } from './variants.js'
 
 const KEYS = {
   clockOn: 'splitpot_tools_clock_on',
   dealerOn: 'splitpot_tools_dealer_on',
   levelMinutes: 'splitpot_tools_level_minutes',
+  choiceOn: 'splitpot_tools_choice_on',
+  games: 'splitpot_tools_games',
 }
 
 // Every access is wrapped: Safari in private mode THROWS on localStorage rather than
@@ -56,10 +59,18 @@ export function levelMinutes() {
 
 export const setLevelMinutes = (minutes) => write(KEYS.levelMinutes, String(minutes))
 
+export const choiceEnabled = () => read(KEYS.choiceOn) === 'true'
+export const setChoiceEnabled = (on) => write(KEYS.choiceOn, String(on))
+
+/** The group's games for dealer's choice; the defaults until the host edits the list. */
+export const games = () => parseGames(read(KEYS.games))
+export const saveGames = (list) => write(KEYS.games, JSON.stringify(list))
+
 // ---------- per game ----------
 
 const clockKey = (gameId) => `splitpot_clock_${gameId}`
 const dealerKey = (gameId) => `splitpot_dealer_${gameId}`
+const variantKey = (gameId) => `splitpot_variant_${gameId}`
 
 export function clock(gameId) {
   const raw = read(clockKey(gameId))
@@ -75,8 +86,12 @@ export const dealer = (gameId) => read(dealerKey(gameId))
 
 export const setDealer = (gameId, gamePlayerId) => write(dealerKey(gameId), gamePlayerId ?? null)
 
+/** The game being dealt right now, by name. Null until someone picks or spins. */
+export const variant = (gameId) => read(variantKey(gameId))
+export const setVariant = (gameId, name) => write(variantKey(gameId), name ?? null)
+
 /**
- * Both keys for one game, dropped together.
+ * Every per-game key for one game, dropped together.
  *
  * Deleting a game used to leave its clock and its dealer behind forever - the phone had the
  * same bug and it was fixed there in passing. These are per-game keys in a store nothing else
@@ -85,4 +100,5 @@ export const setDealer = (gameId, gamePlayerId) => write(dealerKey(gameId), game
 export function forgetGame(gameId) {
   write(clockKey(gameId), null)
   write(dealerKey(gameId), null)
+  write(variantKey(gameId), null)
 }

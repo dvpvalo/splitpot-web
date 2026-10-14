@@ -36,6 +36,9 @@ const PAYMENT_TYPES = [
 const typeLabel = (wire) => PAYMENT_TYPES.find(([w]) => w === wire)?.[1] ?? 'None'
 // Offered in the form only while UPI is switched on; a saved UPI player still reads right.
 const OFFERED = PAYMENT_TYPES.filter(([w]) => w !== 'upi' || UPI_ENABLED)
+// Merge duplicates is held for the first update after launch: true brings back "Same person as…".
+// Same flag in PeopleScreen.kt. merge_players itself must be in the splitpot DB first.
+const MERGE_ENABLED = false
 
 export function peopleView() {
   const root = el('main', 'screen screen-wide')
@@ -305,7 +308,7 @@ function playerEditSheet(existing, reload) {
   )
   if (existing) body.appendChild(cardSection(existing, reload))
   if (existing) body.appendChild(removePlayer(existing, reload, () => dlg.close()))
-  if (existing && !existing.is_self) {
+  if (MERGE_ENABLED && existing && !existing.is_self) {
     body.appendChild(button('Same person as…', () => mergeSheet(existing, reload, () => dlg.close()), 'btn-link'))
   }
 

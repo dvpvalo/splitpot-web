@@ -132,8 +132,8 @@ export function playerSheet(seat, detail, onSaved) {
     padToggle.disabled = !live
 
     const amount = cents()
-    submit.textContent = (mode === 'buyin' ? 'Add buy-in ' : 'Record cash-out ')
-      + formatMoney(amount ?? 0, currency)
+    submit.textContent = (mode === 'buyin' ? 'Add buy-in' : 'Record cash-out')
+      + (amount > 0 ? ` ${formatMoney(amount, currency)}` : '')
     submit.disabled = !live || !amount || amount <= 0
 
     note.textContent = live ? '' : 'This game is finished. Reopen it to make changes.'

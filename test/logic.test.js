@@ -1181,3 +1181,30 @@ test('rounding: off, exact multiples, and an unbalanced table are left alone', (
   // Ties on the remainder go by player id, so every device rounds the same way.
   assert.deepEqual(roundedNets([s('B', 500), s('A', 500), s('C', -1000)], 1000).map((x) => x.netCents), [0, 1000, -1000])
 })
+
+import { usualBuyIn } from '../public/lib/table.js'
+
+test('usualBuyIn: this table first, then past openings in this currency, ties go larger', () => {
+  const seats = [{ lastBuyInCents: 20000 }, { lastBuyInCents: 20000 }, { lastBuyInCents: 50000 }, { lastBuyInCents: null }]
+  assert.equal(usualBuyIn(seats, [], 'INR'), 20000)
+  assert.equal(usualBuyIn([{ lastBuyInCents: 100 }, { lastBuyInCents: 300 }], [], 'INR'), 300)
+  const fresh = [{ lastBuyInCents: null }, { lastBuyInCents: null }]
+  const nights = [
+    { currency: 'INR', firstBuyinCents: 50000 }, { currency: 'INR', firstBuyinCents: 50000 },
+    { currency: 'INR', firstBuyinCents: 20000 }, { currency: 'USD', firstBuyinCents: 2000 },
+    { currency: 'USD', firstBuyinCents: 2000 }, { currency: 'USD', firstBuyinCents: 2000 },
+  ]
+  assert.equal(usualBuyIn(fresh, nights, 'INR'), 50000)
+  assert.equal(usualBuyIn(fresh, nights, 'EUR'), null)
+})
+
+import { askAlert } from '../public/lib/table.js'
+
+test('askAlert: one ask is spelled out, several are counted, none is silent', () => {
+  const fmt = (c) => `₹${c / 100}`
+  const name = () => 'Yash M.'
+  assert.equal(askAlert([], name, fmt), null)
+  assert.equal(askAlert([{ kind: 'buyin', amount_cents: 20000 }], name, fmt), 'Yash M. asks for a ₹200 rebuy')
+  assert.equal(askAlert([{ kind: 'cashout', amount_cents: 125000 }], name, fmt), 'Yash M. counted ₹1250')
+  assert.equal(askAlert([{ kind: 'buyin' }, { kind: 'cashout' }], name, fmt), '2 new asks from the ledger')
+})

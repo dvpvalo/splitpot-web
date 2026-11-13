@@ -5,7 +5,7 @@
 // banner naming the player and the amount, with Retry; it never fails quietly.
 
 import {
-  addEntry, decideRequest, deleteEntry, deleteGame, finishGame, gameChanges, gameDetail, hostStats,
+  addEntry, addPlayer, decideRequest, deleteEntry, deleteGame, finishGame, gameChanges, gameDetail, hostStats,
   players, sameTableAgain,
   reopenGame, seatPlayer, setSettlementPaid, shuffleSeats, standingsOf,
 } from '../db.js'
@@ -30,10 +30,11 @@ import { joinHint, ledgerMessage, ledgerUrl } from '../lib/share.js'
 import qrcode from '../vendor/qrcode.js'
 import {
   SEAT_H, SEAT_W, rackEdges, regularsFirst, seatName, shuffled, stackCheck, stackVerdict,
-  tableLayout,
+  tableLayout, usualBuyIn, askAlert,
 } from '../lib/table.js'
 import { settlementCard } from '../lib/card.js'
 import { playerSheet } from './playersheet.js'
+import { capitalizeFirst } from './newgame.js'
 
 export function gameView(gameId) {
   // screen-wide: this is the one screen that becomes two columns, so it is the one screen
@@ -52,6 +53,26 @@ export function gameView(gameId) {
   const clockCard = clockEnabled() ? blindClock(gameId) : null
   const awake = screenAwake()
 
+  // A ledger ask the host has not been told about: buzz, beep and a banner, and a browser
+  // notification if this tab is hidden and notifications were allowed. Asks already pending
+  // when the screen opened are on the card and are not announced again.
+  let seen = null
+  const announceAsks = (detail) => {
+    const pending = detail.game.status === 'live' ? (detail.requests ?? []) : []
+    const fresh = seen ? pending.filter((r) => !seen.has(r.id)) : []
+    seen = new Set(pending.map((r) => r.id))
+    const seatOf = new Map(detail.seats.map((s) => [s.gamePlayerId, s]))
+    const text = askAlert(fresh, (r) => seatName(seatOf.get(r.game_player_id)?.player.name ?? 'Player'),
+      (c) => formatMoney(c, detail.game.currency))
+    if (!text) return
+    showNotice(text)
+    navigator.vibrate?.([200, 100, 200])
+    beep()
+    if (document.hidden && window.Notification?.permission === 'granted') {
+      try { new Notification(detail.game.name, { body: text, tag: `asks-${gameId}` }) } catch { /* not allowed here */ }
+    }
+  }
+
   const load = async (quiet = false) => {
     if (!quiet) {
       clear(body)
@@ -59,6 +80,7 @@ export function gameView(gameId) {
     }
     try {
       const detail = await gameDetail(gameId)
+      announceAsks(detail)
       clear(body)
       // Off means ABSENT, not greyed out: a host who never switched the clock on pays no
       // pixels for it. Same rule as the phone.
@@ -111,6 +133,25 @@ export function gameView(gameId) {
 
   load()
   return root
+}
+
+/** Two short tones. Silent where the browser has not allowed sound yet; nothing to recover. */
+let audio = null
+function beep() {
+  try {
+    audio ??= new AudioContext()
+    audio.resume?.()
+    for (const [at, hz] of [[0, 880], [0.18, 1175]]) {
+      const osc = audio.createOscillator()
+      const gain = audio.createGain()
+      osc.frequency.value = hz
+      gain.gain.setValueAtTime(0.2, audio.currentTime + at)
+      gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + at + 0.15)
+      osc.connect(gain).connect(audio.destination)
+      osc.start(audio.currentTime + at)
+      osc.stop(audio.currentTime + at + 0.16)
+    }
+  } catch { /* no audio here */ }
 }
 
 /**
@@ -932,6 +973,10 @@ function actionsSection(detail, reload) {
       }
     }, 'btn btn-primary')
     wrap.appendChild(finish)
+    // Start of the night: the same buy-in for everyone still at the table, in one go.
+    if (detail.seats.filter((s) => !s.hasCashedOut).length >= 2) {
+      wrap.appendChild(button('Buy everyone in', () => buyEveryoneIn(detail, reload), 'btn'))
+    }
     // End of the night: everyone still at the table, one after another, on one screen.
     if (detail.seats.some((s) => !s.hasCashedOut)) {
       wrap.appendChild(button('Cash-out round', () => cashOutRound(detail, reload), 'btn'))
@@ -1106,7 +1151,64 @@ function cashOutRound(detail, reload) {
   draw()
 }
 
+/**
+ * One amount, a buy-in for every seat that has not cashed out. Each is its own money write, in
+ * seat order; anyone whose write fails is named and nobody after them is skipped.
+ */
+function buyEveryoneIn(detail, reload) {
+  const { game } = detail
+  const cur = game.currency
+  const seats = detail.seats.filter((s) => !s.hasCashedOut)
+  const body = el('div', 'stack-tight')
+  const dlg = sheet('Buy everyone in', body)
+  const input = el('input', 'field round-amount')
+  input.inputMode = 'decimal'
+  input.placeholder = '0'
+  input.setAttribute('aria-label', 'Buy-in for each player')
+  // Pre-filled once host_stats answers, unless the host has started typing.
+  hostStats().catch(() => ({ nights: [] })).then((stats) => {
+    const usual = usualBuyIn(seats, stats.nights, cur)
+    if (usual && input.value === '') { input.value = formatAmount(usual, cur); label() }
+  })
+  const error = el('p', 'stack-off')
+  error.hidden = true
+  const go = button('', async () => {
+    const cents = parseMoney(input.value, cur)
+    if (!cents || cents <= 0) { input.focus(); return }
+    go.disabled = true
+    go.textContent = 'Saving…'
+    clearBanner()
+    const failed = []
+    for (const s of seats) {
+      try {
+        await addEntry({ gameId: game.id, gamePlayerId: s.gamePlayerId, kind: 'buyin', amountCents: cents })
+      } catch (e) {
+        failed.push(`${s.player.name} (${e.message ?? e})`)
+      }
+    }
+    await reload()
+    if (failed.length === 0) { dlg.close(); return }
+    error.textContent = `Buy-in was NOT saved for: ${failed.join(', ')}. Everyone else got ${formatMoney(cents, cur)}.`
+    error.hidden = false
+    go.hidden = true
+  }, 'btn btn-primary')
+  const label = () => {
+    const cents = parseMoney(input.value, cur)
+    go.textContent = `Buy in ${seats.length} players` + (cents > 0 ? ` · ${formatMoney(cents, cur)} each` : '')
+  }
+  input.addEventListener('input', label)
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click() })
+  label()
+  mount(body,
+    el('p', 'row-sub', seats.map((s) => s.player.name).join(', ')),
+    input, error, go)
+  input.focus()
+}
+
 function joinSheet(game) {
+  // Players are about to open the ledger: the moment to ask whether their asks may pop up here
+  // while this tab is in the background. Asked once; a no is the browser's to remember.
+  if (window.Notification?.permission === 'default') Notification.requestPermission().catch(() => {})
   const qr = qrcode(0, 'M')
   qr.addData(ledgerUrl({ ledgerSlug: game.ledger_slug }))
   qr.make()
@@ -1208,10 +1310,6 @@ async function seatSheet(detail, reload) {
     const seated = new Set(detail.seats.map((s) => s.player.id))
     const free = roster.filter((p) => !seated.has(p.id) && !p.retired)
     clear(body)
-    if (free.length === 0) {
-      body.appendChild(el('p', 'muted', 'Everyone in your list is already at this table.'))
-      return
-    }
     // Counted here, not read from `detail`, which is a snapshot from when the sheet opened: two
     // quick taps must not both claim the same seat number.
     let nextSeat = detail.seats.length
@@ -1219,8 +1317,56 @@ async function seatSheet(detail, reload) {
     const done = button('Done', () => dlg.close(), 'btn btn-primary')
     const drawDone = () => { done.textContent = added === 0 ? 'Done' : `Done · ${added} seated` }
 
+    // A new face: type the name, it is added to your players and seated in one go.
+    const input = el('input', 'field')
+    input.placeholder = 'New player: type a name'
+    input.autocapitalize = 'words'
+    input.maxLength = 60
+    const add = el('button', 'btn btn-primary intro-add', 'Add & seat')
+    add.type = 'submit'
+    const form = mount(el('form', 'intro-addrow'), input, add)
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const name = capitalizeFirst(input.value.trim())
+      if (!name) return
+      const known = roster.find((p) => p.name.toLowerCase() === name.toLowerCase())
+      if (known && seated.has(known.id)) {
+        showError(`${known.name} is already at this table.`)
+        return
+      }
+      // Someone already in your list is seated from their own row, not added a second time.
+      if (known) {
+        const row = rows.get(known.id)
+        if (!row) { showError(`${known.name} is retired. Bring them back from People first.`); return }
+        row.click()
+        input.value = ''
+        return
+      }
+      add.disabled = true
+      clearBanner()
+      try {
+        const p = await addPlayer({ name })
+        roster.push(p)
+        await seatPlayer(detail.game.id, p.id, nextSeat++)
+        seated.add(p.id)
+        added++
+        drawDone()
+        list.prepend(mount(el('div', 'row seat-pick seat-pick-on'), monogram(p),
+          mount(el('div', 'row-main'), el('h3', 'row-title', p.name)), el('span', 'seat-pick-status', '✓ Seated')))
+        input.value = ''
+        input.focus()
+        reload()
+      } catch (err) {
+        showError(`${name} was NOT seated: ${err.message ?? err}`)
+      } finally {
+        add.disabled = false
+      }
+    })
+
     body.appendChild(el('p', 'muted small', 'Tap everyone who is playing. Each one is seated as you tap.'))
     const list = el('div', 'list')
+    const rows = new Map()
+    if (free.length === 0) list.appendChild(el('p', 'muted', 'Everyone in your list is already at this table.'))
     for (const p of free) {
       const row = el('button', 'row row-tappable seat-pick')
       row.type = 'button'
@@ -1229,12 +1375,14 @@ async function seatSheet(detail, reload) {
       main.appendChild(el('h3', 'row-title', p.name))
       mount(row, monogram(p), main, status)
       row.addEventListener('click', async () => {
+        if (seated.has(p.id)) return
         row.disabled = true
         status.textContent = 'Seating…'
         const order = nextSeat++
         clearBanner()
         try {
           await seatPlayer(detail.game.id, p.id, order)
+          seated.add(p.id)
           row.classList.add('seat-pick-on')
           status.textContent = '✓ Seated'
           added++
@@ -1246,9 +1394,10 @@ async function seatSheet(detail, reload) {
           showError(`${p.name} was NOT seated: ${e.message ?? e}`)
         }
       })
+      rows.set(p.id, row)
       list.appendChild(row)
     }
-    mount(body, list, done)
+    mount(body, form, list, done)
   } catch (e) {
     clear(body)
     body.appendChild(el('p', 'muted', `Could not load your players: ${e.message ?? e}`))

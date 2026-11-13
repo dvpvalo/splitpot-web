@@ -118,6 +118,35 @@ export function whatsLeft(seats, gamePlayerId, inPlayCents) {
 }
 
 /**
+ * The one line that announces new asks from the ledger. `nameOf(request)` and `fmt(cents)` come
+ * from the caller; more than one ask is counted, not listed.
+ */
+export function askAlert(requests, nameOf, fmt) {
+  if (requests.length === 0) return null
+  if (requests.length > 1) return `${requests.length} new asks from the ledger`
+  const r = requests[0]
+  return r.kind === 'buyin'
+    ? `${nameOf(r)} asks for a ${fmt(r.amount_cents)} rebuy`
+    : `${nameOf(r)} counted ${fmt(r.amount_cents)}`
+}
+
+/**
+ * The buy-in "Buy everyone in" starts on: the commonest latest buy-in at this table, else the
+ * commonest opening buy-in from finished nights in this currency, else null. Ties go larger.
+ */
+export function usualBuyIn(seats, nights, currency) {
+  const commonest = (values) => {
+    const n = new Map()
+    for (const v of values) if (v > 0) n.set(v, (n.get(v) ?? 0) + 1)
+    let best = null
+    for (const [v, c] of n) if (best === null || c > n.get(best) || (c === n.get(best) && v > best)) best = v
+    return best
+  }
+  return commonest(seats.map((s) => s.lastBuyInCents ?? 0))
+    ?? commonest(nights.filter((n) => n.currency === currency).map((n) => n.firstBuyinCents ?? 0))
+}
+
+/**
  * The roster for seating, regulars first: whoever played most recently on top, more games
  * breaking a tie, and anyone who has never finished a game after them in the order given.
  * `nights` is host_stats' per-player rows ({ playerId, playedOn } with an ISO date).
